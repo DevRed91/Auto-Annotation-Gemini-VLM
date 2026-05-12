@@ -1,21 +1,21 @@
 import { dyno, SplatMesh } from "@sparkjsdev/spark";
 
 const effectParams = {
-    effect: "Magic"
+  effect: "Magic"
 };
 const animateT = dyno.dynoFloat(0);
 
 export const setupSplatModifier = (splatMesh: SplatMesh) => {
-    splatMesh.objectModifier = dyno.dynoBlock(
-        { gsplat: dyno.Gsplat },
-        { gsplat: dyno.Gsplat },
-        ({ gsplat }) => {
-            const d = new dyno.Dyno({
-                inTypes: { gsplat: dyno.Gsplat, t: "float", effectType: "int" },
-                outTypes: { gsplat: dyno.Gsplat },
-                // GLSL utility functions for effects
-                globals: () => [
-                    dyno.unindent(`
+  splatMesh.objectModifier = dyno.dynoBlock(
+    { gsplat: dyno.Gsplat },
+    { gsplat: dyno.Gsplat },
+    ({ gsplat }) => {
+      const d = new dyno.Dyno({
+        inTypes: { gsplat: dyno.Gsplat, t: "float", effectType: "int" },
+        outTypes: { gsplat: dyno.Gsplat },
+        // GLSL utility functions for effects
+        globals: () => [
+          dyno.unindent(`
               // Pseudo-random hash function
               vec3 hash(vec3 p) {
                 p = fract(p * 0.3183099 + 0.1);
@@ -76,9 +76,9 @@ export const setupSplatModifier = (splatMesh: SplatMesh) => {
                 return vec4(pos, smoothstep(-10., y, pos.y));
               }
             `)
-                ],
-                // Main effect shader logic
-                statements: ({ inputs, outputs }) => dyno.unindentLines(`
+        ],
+        // Main effect shader logic
+        statements: ({ inputs, outputs }) => dyno.unindentLines(`
             ${outputs.gsplat} = ${inputs.gsplat};
             float t = ${inputs.t};
             float s = smoothstep(0.,10.,t-4.5)*10.;
@@ -132,24 +132,24 @@ export const setupSplatModifier = (splatMesh: SplatMesh) => {
               ${outputs.gsplat}.quaternion = quatQuat(spinQ, ${inputs.gsplat}.quaternion);
             }
           `),
-            });
+      });
 
-            // Map effect names to shader integer constants
-            const effectType = effectParams.effect === "Magic" ? 1 :
-                effectParams.effect === "Spread" ? 2 :
-                    effectParams.effect === "Unroll" ? 3 :
-                        effectParams.effect === "Twister" ? 4 : 5;
+      // Map effect names to shader integer constants
+      // const effectType = effectParams.effect === "Magic" ? 1 :
+      //   effectParams.effect === "Spread" ? 2 :
+      //     effectParams.effect === "Unroll" ? 3 :
+      //       effectParams.effect === "Twister" ? 4 : 5;
 
-            gsplat = d.apply({
-                gsplat,
-                t: animateT,
-                effectType: dyno.dynoInt(effectType)
-            }).gsplat;
+      gsplat = d.apply({
+        gsplat,
+        t: animateT,
+        effectType: dyno.dynoInt(1)
+      }).gsplat;
 
-            return { gsplat };
-        }
-    );
+      return { gsplat };
+    }
+  );
 
-    // Apply shader modifications to splat mesh
-    splatMesh.updateGenerator();
+  // Apply shader modifications to splat mesh
+  splatMesh.updateGenerator();
 }

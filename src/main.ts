@@ -9,7 +9,7 @@ const app = document.querySelector<HTMLDivElement>('#app')!
 app.innerHTML = `
   <div class="loader-container">
     <div class="loader"></div>
-    <p>Initializing WorldLab-Int...</p>
+    <p>Loading...</p>
   </div>
 `
 
@@ -56,7 +56,7 @@ function renderMainUI() {
   // updateGenerateState()
 
   // imageInput.focus()
-
+  document.addEventListener("touchstart", handleTouchStart, { passive: false });
   generateBtn.addEventListener('click', async () => {
     const apiKey = apiKeyInput.value.trim()
     if (!apiKey) {
