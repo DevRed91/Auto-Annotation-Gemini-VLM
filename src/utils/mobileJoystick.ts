@@ -17,8 +17,20 @@
  *   // input.active: boolean (is joystick being touched)
  */
 
+interface JoystickConfig {
+    joystickSize: number;
+    knobSize: number;
+    deadzone: number;
+    marginLeft: number;
+    marginBottom: number;
+    outerColor: string;
+    outerBorder: string;
+    knobColor: string;
+    knobActiveColor: string;
+}
+
 // Configuration
-const CONFIG = {
+const CONFIG: JoystickConfig = {
     joystickSize: 120,
     knobSize: 50,
     deadzone: 0.15,
@@ -45,7 +57,9 @@ let lookDelta = { x: 0, y: 0 };
 /**
  * Check if the current device is a mobile/touch device (but NOT a VR headset)
  */
-export function isMobileDevice() {
+export function isMobileDevice(): boolean {
+    if (typeof navigator === 'undefined') return false;
+    
     if (/OculusBrowser|Quest|Oculus/i.test(navigator.userAgent)) {
         return false;
     }
@@ -61,7 +75,7 @@ export function isMobileDevice() {
 /**
  * Initialize mobile controls
  */
-export function initMobileControls(options = {}) {
+export function initMobileControls(options: Partial<JoystickConfig> = {}): void {
     if (initialized) return;
     Object.assign(CONFIG, options);
     createJoystickUI();
@@ -73,7 +87,7 @@ export function initMobileControls(options = {}) {
 /**
  * Get current mobile look/rotation delta
  */
-export function getMobileLook() {
+export function getMobileLook(): { x: number; y: number } {
     const delta = { ...lookDelta };
     // Reset delta after reading to avoid continuous rotation
     lookDelta.x = 0;
@@ -84,7 +98,7 @@ export function getMobileLook() {
 /**
  * Get current mobile movement input
  */
-export function getMobileInput() {
+export function getMobileInput(): { x: number; y: number; active: boolean } {
     if (!enabled || !initialized) {
         return { x: 0, y: 0, active: false };
     }
@@ -94,17 +108,18 @@ export function getMobileInput() {
 /**
  * Enable or disable mobile controls
  */
-export function setMobileControlsEnabled(value) {
+export function setMobileControlsEnabled(value: boolean): void {
     enabled = value;
     if (joystickContainer) {
         joystickContainer.style.display = enabled ? "block" : "none";
     }
     if (!enabled) {
         currentInput = { x: 0, y: 0, active: false };
+        resetJoystick();
     }
 }
 
-function createJoystickUI() {
+function createJoystickUI(): void {
     joystickContainer = document.createElement("div");
     joystickContainer.id = "mobile-joystick";
     joystickContainer.style.cssText = `
@@ -149,7 +164,7 @@ function createJoystickUI() {
     updateJoystickCenter();
 }
 
-function updateJoystickCenter() {
+function updateJoystickCenter(): void {
     if (!joystickContainer) return;
     const rect = joystickContainer.getBoundingClientRect();
     joystickCenter = {
@@ -158,11 +173,13 @@ function updateJoystickCenter() {
     };
 }
 
-function attachEventListeners() {
+const handleOrientationChange = (): void => {
+    setTimeout(updateJoystickCenter, 100);
+};
+
+function attachEventListeners(): void {
     window.addEventListener("resize", updateJoystickCenter);
-    window.addEventListener("orientationchange", () => {
-        setTimeout(updateJoystickCenter, 100);
-    });
+    window.addEventListener("orientationchange", handleOrientationChange);
 
     if (joystickContainer) {
         joystickContainer.addEventListener("touchstart", handleTouchStart, {
@@ -173,7 +190,34 @@ function attachEventListeners() {
     document.addEventListener("touchend", handleTouchEnd, { passive: false });
     document.addEventListener("touchcancel", handleTouchEnd, { passive: false });
 }
-function isInsideJoystick(x, y) {
+
+/**
+ * Remove all event listeners and UI elements
+ */
+export function destroyMobileControls(): void {
+    if (!initialized) return;
+
+    window.removeEventListener("resize", updateJoystickCenter);
+    window.removeEventListener("orientationchange", handleOrientationChange);
+
+    if (joystickContainer) {
+        joystickContainer.removeEventListener("touchstart", handleTouchStart);
+        if (joystickContainer.parentNode) {
+            joystickContainer.parentNode.removeChild(joystickContainer);
+        }
+    }
+    document.removeEventListener("touchmove", handleTouchMove);
+    document.removeEventListener("touchend", handleTouchEnd);
+    document.removeEventListener("touchcancel", handleTouchEnd);
+
+    joystickContainer = null;
+    joystickKnob = null;
+    activeTouch = null;
+    lookTouch = null;
+    initialized = false;
+}
+
+function isInsideJoystick(x: number, y: number): boolean {
     if (!joystickContainer) return false;
     const rect = joystickContainer.getBoundingClientRect();
     const cx = rect.left + rect.width / 2;
@@ -184,10 +228,11 @@ function isInsideJoystick(x, y) {
     return dx * dx + dy * dy <= radius * radius;
 }
 
-function handleTouchStart(e) {
+function handleTouchStart(e: TouchEvent): void {
     if (!enabled) return;
 
-    for (const touch of e.changedTouches) {
+    for (let i = 0; i < e.changedTouches.length; i++) {
+        const touch = e.changedTouches[i];
         const x = touch.clientX;
         const y = touch.clientY;
 
@@ -199,7 +244,7 @@ function handleTouchStart(e) {
                 joystickKnob.style.background = CONFIG.knobActiveColor;
             }
             currentInput.active = true;
-            e.preventDefault();
+            if (e.cancelable) e.preventDefault();
             continue;
         }
 
@@ -207,18 +252,20 @@ function handleTouchStart(e) {
             lookTouch = touch.identifier;
             lastLookPos.x = x;
             lastLookPos.y = y;
-            e.preventDefault();
+            // Don't preventDefault here if you want other buttons to work, 
+            // but for look area it's usually desired.
         }
     }
 }
 
-function handleTouchMove(e) {
+function handleTouchMove(e: TouchEvent): void {
     if (!enabled) return;
 
-    for (const touch of e.changedTouches) {
+    for (let i = 0; i < e.changedTouches.length; i++) {
+        const touch = e.changedTouches[i];
         if (touch.identifier === activeTouch) {
             updateJoystickPosition(touch.clientX, touch.clientY);
-            e.preventDefault();
+            if (e.cancelable) e.preventDefault();
         } else if (touch.identifier === lookTouch) {
             const dx = touch.clientX - lastLookPos.x;
             const dy = touch.clientY - lastLookPos.y;
@@ -228,24 +275,24 @@ function handleTouchMove(e) {
 
             lastLookPos.x = touch.clientX;
             lastLookPos.y = touch.clientY;
-            e.preventDefault();
+            if (e.cancelable) e.preventDefault();
         }
     }
 }
 
-function handleTouchEnd(e) {
-    for (const touch of e.changedTouches) {
+function handleTouchEnd(e: TouchEvent): void {
+    for (let i = 0; i < e.changedTouches.length; i++) {
+        const touch = e.changedTouches[i];
         if (touch.identifier === activeTouch) {
             resetJoystick();
         } else if (touch.identifier === lookTouch) {
             lookTouch = null;
-            lookDelta.x = 0;
-            lookDelta.y = 0;
+            // We don't reset lookDelta here to allow getMobileLook to pick up the last movement
         }
     }
 }
 
-function updateJoystickPosition(touchX, touchY) {
+function updateJoystickPosition(touchX: number, touchY: number): void {
     const maxRadius = (CONFIG.joystickSize - CONFIG.knobSize) / 2;
 
     let dx = touchX - joystickCenter.x;
@@ -274,7 +321,7 @@ function updateJoystickPosition(touchX, touchY) {
     currentInput.y = inputY;
 }
 
-function resetJoystick() {
+function resetJoystick(): void {
     activeTouch = null;
     currentInput = { x: 0, y: 0, active: false };
 
