@@ -56,7 +56,7 @@ function renderMainUI() {
   // updateGenerateState()
 
   // imageInput.focus()
-  document.addEventListener("touchstart", handleTouchStart, { passive: false });
+  // document.addEventListener("touchstart", handleTouchStart, { passive: false });
   generateBtn.addEventListener('click', async () => {
     const apiKey = apiKeyInput.value.trim()
     if (!apiKey) {

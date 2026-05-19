@@ -11,10 +11,7 @@ export class SplatViewer {
     private spark: SparkRenderer;
     private controls: SparkControls;
     private currentSplat: SplatMesh | null = null;
-    private raycaster = new THREE.Raycaster();
-    private down = new THREE.Vector3(0, -1, 0);
-    private desiredCameraHeight = 1.7;
-    private groundPlane: THREE.Mesh | null = null;
+    private desiredCameraHeight = 0.15;
     private isMobile: boolean = isMobileDevice();
     private cameraRig = new THREE.Group();
     private animateT = dyno.dynoFloat(0);
@@ -58,38 +55,46 @@ export class SplatViewer {
         let lastTime = performance.now();
         this.renderer.setAnimationLoop((time) => {
             this.controls.update(this.cameraRig);
-            // this.lockCameraHeightToGround();
+            this.lockCameraHeightToGround();
             const MOVE_SPEED = 2.0;
             const deltaTime = (time - lastTime) / 1000;
             lastTime = time;
-            if (this.isMobile) {
-                const input = getMobileInput();
-                const look = getMobileLook();
-                const LOOK_SPEED = 0.005;
-
-                // Rotation
-                if (look.x !== 0 || look.y !== 0) {
-                    // Yaw (left/right) on the rig
-                    this.cameraRig.rotateY(-look.x * LOOK_SPEED);
-
-                    // Pitch (up/down) on the camera itself
-                    this.camera.rotateX(-look.y * LOOK_SPEED);
-
-                    // Optional: Clamp pitch to avoid flipping
-                    const maxPitch = Math.PI / 2.1;
-                    this.camera.rotation.x = Math.max(-maxPitch, Math.min(maxPitch, this.camera.rotation.x));
-                }
-
-                // Movement
-                if (input.x !== 0 || input.y !== 0) {
-                    const move = new THREE.Vector3(input.x, 0, input.y);
-                    move.multiplyScalar(MOVE_SPEED * deltaTime);
-                    move.applyQuaternion(this.cameraRig.quaternion);
-                    this.cameraRig.position.add(move);
-                }
+            if (this.splatLoaded) {
+                this.baseTime += 1 / 60;
+                this.animateT.value = this.baseTime;
+            } else {
+                this.animateT.value = 0;
             }
+
+            this.updateMobileControls(deltaTime, MOVE_SPEED);
             this.renderer.render(this.scene, this.camera);
         });
+    }
+
+    private updateMobileControls(deltaTime: number, moveSpeed: number) {
+        if (!this.isMobile) {
+            return;
+        }
+
+        const input = getMobileInput();
+        const look = getMobileLook();
+        const LOOK_SPEED = 0.005;
+
+        if (look.x !== 0 || look.y !== 0) {
+            this.cameraRig.rotateY(-look.x * LOOK_SPEED);
+            this.camera.rotateX(-look.y * LOOK_SPEED);
+
+            const maxPitch = Math.PI / 2.1;
+            this.camera.rotation.x = Math.max(-maxPitch, Math.min(maxPitch, this.camera.rotation.x));
+        }
+
+        if (input.x !== 0 || input.y !== 0) {
+            const move = new THREE.Vector3(input.x, 0, input.y);
+            move.multiplyScalar(moveSpeed * deltaTime);
+            move.applyQuaternion(this.cameraRig.quaternion);
+            move.y = 0; // Stay grounded — don't let pitch affect vertical position
+            this.cameraRig.position.add(move);
+        }
     }
 
     private setMobileControls() {
@@ -133,23 +138,18 @@ export class SplatViewer {
         const splat = new SplatMesh({ url });
         splat.quaternion.set(1, 0, 0, 0);
         splat.position.set(0, -1.5, 0);
-        // setupSplatModifier(splat);
         this.currentSplat = splat;
         this.scene.add(this.currentSplat);
         this.splatLoaded = true;
-        // this.addGroundPlane();
+
+        // setupSplatModifier(this.currentSplat);
+        this.addGroundPlane();
 
     }
     private lockCameraHeightToGround() {
-        if (!this.groundPlane) return;
-
-        this.raycaster.set(this.camera.position, this.down);
-        const hits = this.raycaster.intersectObject(this.groundPlane, false);
-
-        if (hits.length === 0) return;
-
-        const groundY = hits[0].point.y;
-        this.camera.position.y = groundY + this.desiredCameraHeight;
+        // Game-style: keep the rig at a fixed height above the world origin (Y=0 ground).
+        // The camera sits at local Y=0 inside the rig, so the rig's Y IS the eye height.
+        this.cameraRig.position.y = this.desiredCameraHeight;
     }
 }
 

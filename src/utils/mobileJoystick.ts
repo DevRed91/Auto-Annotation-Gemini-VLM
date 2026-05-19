@@ -184,20 +184,6 @@ function isInsideJoystick(x, y) {
     return dx * dx + dy * dy <= radius * radius;
 }
 
-// function handleTouchStart(e) {
-//     if (!enabled || activeTouch !== null) return;
-
-//     const touch = e.changedTouches[0];
-//     activeTouch = touch.identifier;
-
-//     updateJoystickCenter();
-//     updateJoystickPosition(touch.clientX, touch.clientY);
-
-//     joystickKnob.style.background = CONFIG.knobActiveColor;
-//     currentInput.active = true;
-
-//     e.preventDefault();
-// }
 function handleTouchStart(e) {
     if (!enabled) return;
 
