@@ -14,6 +14,27 @@ import {
 } from "./utils/mobileJoystick";
 // import { OrbitControls } from "three/examples/jsm/Addons.js";
 
+const API_BASE_URL =
+  (import.meta.env.VITE_API_BASE_URL as string | undefined)?.replace(/\/+$/, "") ||
+  "/api";
+const BYPASS_TUNNEL_REMINDER =
+  (import.meta.env.VITE_BYPASS_TUNNEL_REMINDER as string | undefined) === "true";
+
+function buildAnnotateEndpoint(baseUrl: string): string {
+  const normalized = baseUrl.replace(/\/+$/, "");
+
+  if (normalized.endsWith("/annotate")) {
+    return normalized;
+  }
+  if (normalized.endsWith("/api")) {
+    return `${normalized}/annotate`;
+  }
+  if (normalized.startsWith("http")) {
+    return `${normalized}/api/annotate`;
+  }
+  return `${normalized}/annotate`;
+}
+
 export class SplatViewer {
   private scene: THREE.Scene;
   private camera: THREE.PerspectiveCamera;
@@ -369,10 +390,17 @@ public async requestAnnotationFromGemini(box: number[]) {
     try {
         // const dataUrl = this.renderer.domElement.toDataURL("image/jpeg", 0.7);
         const dataUrl = await this.captureSnapshot();
+        const headers: Record<string, string> = { "Content-Type": "application/json" };
 
-        const response = await fetch("http://localhost:3000/api/annotate", {
+        if (BYPASS_TUNNEL_REMINDER) {
+          headers["bypass-tunnel-reminder"] = "true";
+        }
+
+        const endpoint = buildAnnotateEndpoint(API_BASE_URL);
+
+        const response = await fetch(endpoint, {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
+            headers,
             body: JSON.stringify({ image: dataUrl, userBox: box }),
         });
 

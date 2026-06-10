@@ -38,6 +38,20 @@ This service provides an API endpoint that:
    npx ts-node server.ts
    ```
 
+## Frontend API Configuration
+
+Create a `.env` file in the frontend project root:
+
+```text
+VITE_API_BASE_URL=/api
+VITE_BYPASS_TUNNEL_REMINDER=false
+```
+
+Notes:
+- For local development with Vite proxy, keep `VITE_API_BASE_URL=/api`.
+- For deployed frontend + local backend tunnel, set `VITE_API_BASE_URL` to your public tunnel URL (for example `https://example.loca.lt`).
+- Set `VITE_BYPASS_TUNNEL_REMINDER=true` only if your tunnel provider requires that custom header.
+
 ## API Documentation
 
 ### `POST /api/annotate`
