@@ -1,9 +1,9 @@
-import './style.css'
-import './script.ts'
-import { loadWorld } from './script'
-import { WorldLabsService } from './worldlabs'
+import "./style.css";
+import "./script.ts";
+import { loadWorld } from "./script";
+import { WorldLabsService } from "./worldlabs";
 
-const app = document.querySelector<HTMLDivElement>('#app')!
+const app = document.querySelector<HTMLDivElement>("#app")!;
 
 // Initial Landing UI
 app.innerHTML = `
@@ -11,11 +11,11 @@ app.innerHTML = `
     <div class="loader"></div>
     <p>Loading...</p>
   </div>
-`
+`;
 
 setTimeout(() => {
-  renderMainUI()
-}, 1000)
+  renderMainUI();
+}, 1000);
 
 function renderMainUI() {
   // app.innerHTML = `
@@ -42,54 +42,56 @@ function renderMainUI() {
   //   </div>
   // `
 
-  const controls = document.getElementById('controls')!
-  const generateBtn = document.getElementById('generate-btn') as HTMLButtonElement
-  const apiKeyInput = document.getElementById('api-key') as HTMLInputElement
-  const imageInput = document.getElementById('image-url') as HTMLInputElement
-  const statusText = document.getElementById('status')!
+  const controls = document.getElementById("controls")!;
+  const generateBtn = document.getElementById(
+    "generate-btn",
+  ) as HTMLButtonElement;
+  const apiKeyInput = document.getElementById("api-key") as HTMLInputElement;
+  const imageInput = document.getElementById("image-url") as HTMLInputElement;
+  const statusText = document.getElementById("status")!;
 
   const updateGenerateState = () => {
-    generateBtn.disabled = imageInput.value.trim().length === 0
-  }
+    generateBtn.disabled = imageInput.value.trim().length === 0;
+  };
 
   // imageInput.addEventListener('input', updateGenerateState)
   // updateGenerateState()
 
   // imageInput.focus()
   // document.addEventListener("touchstart", handleTouchStart, { passive: false });
-  generateBtn.addEventListener('click', async () => {
-    const apiKey = apiKeyInput.value.trim()
+  generateBtn.addEventListener("click", async () => {
+    const apiKey = apiKeyInput.value.trim();
     if (!apiKey) {
-      statusText.innerText = 'Please enter an API key'
-      return
+      statusText.innerText = "Please enter an API key";
+      return;
     }
 
     try {
-      generateBtn.disabled = true
-      generateBtn.innerText = 'Initializing...'
+      generateBtn.disabled = true;
+      generateBtn.innerText = "Initializing...";
 
-      const service = new WorldLabsService(apiKey)
-      const imageUrl = imageInput.value.trim()
+      const service = new WorldLabsService(apiKey);
+      const imageUrl = imageInput.value.trim();
       if (!imageUrl) {
-        statusText.innerText = 'Please enter an image URL'
-        generateBtn.disabled = false
-        return
+        statusText.innerText = "Please enter an image URL";
+        generateBtn.disabled = false;
+        return;
       }
 
-      statusText.innerText = 'Generating world from image URL...'
-      const splatUrl = await service.generateWorldFromImageUrl(imageUrl)
+      statusText.innerText = "Generating world from image URL...";
+      const splatUrl = await service.generateWorldFromImageUrl(imageUrl);
 
-      statusText.innerText = 'Generation complete! Loading world...'
-      await loadWorld(splatUrl)
+      statusText.innerText = "Generation complete! Loading world...";
+      await loadWorld(splatUrl);
 
-      statusText.innerText = 'World loaded successfully'
+      statusText.innerText = "World loaded successfully";
     } catch (error: any) {
-      console.error(error)
-      statusText.innerText = `Error: ${error.message}`
+      console.error(error);
+      statusText.innerText = `Error: ${error.message}`;
     } finally {
-      generateBtn.disabled = false
-      updateGenerateState()
-      generateBtn.innerText = 'Enter'
+      generateBtn.disabled = false;
+      updateGenerateState();
+      generateBtn.innerText = "Enter";
     }
-  })
+  });
 }

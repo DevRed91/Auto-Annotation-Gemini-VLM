@@ -5,8 +5,8 @@
   --text-secondary: #a1a1a6;
   --glass-bg: rgba(255, 255, 255, 0.03);
   --glass-border: rgba(255, 255, 255, 0.1);
-  --font-main: 'Inter', system-ui, -apple-system, sans-serif;
-  --font-display: 'Outfit', sans-serif;
+  --font-main: "Inter", system-ui, -apple-system, sans-serif;
+  --font-display: "Outfit", sans-serif;
 }
 
 * {
@@ -237,4 +237,32 @@ canvas {
 
 #app {
   background: transparent;
+}
+
+/* Annotation tool styles */
+.toolbar {
+  position: fixed;
+  top: 12px;
+  left: 12px;
+  z-index: 10;
+}
+
+.toolbar-btn {
+  padding: 6px 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  background: rgba(15, 23, 42, 0.9);
+  color: #e5e7eb;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.toolbar-btn.active {
+  background: #76a8ff;
+  color: #020617;
+}
+
+.annotation-label {
+  z-index: 20;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
 }

@@ -1,27 +1,35 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Gaussian Splatting</title>
+    <meta
+      name="description"
+      content="Advanced Gaussian Splatting Visualization and Interaction Lab."
+    />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;800&family=Outfit:wght@300;500;700&display=swap"
+      rel="stylesheet"
+    />
+  </head>
 
-<head>
-  <meta charset="UTF-8" />
-  <link rel="icon" type="image/svg+xml" href="/vite.svg" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Gaussian Splatting</title>
-  <meta name="description" content="Advanced Gaussian Splatting Visualization and Interaction Lab." />
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link
-    href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;800&family=Outfit:wght@300;500;700&display=swap"
-    rel="stylesheet">
-</head>
-
-<body>
-  <div id="app">
-    <div class="loader-container">
-      <div class="loader"></div>
-      <p>Initializing Scene...</p>
+  <body>
+    <div id="app">
+      <div class="loader-container">
+        <div class="loader"></div>
+        <p>Initializing Scene...</p>
+      </div>
     </div>
-  </div>
-  <script type="module" src="/src/main.ts"></script>
-</body>
-
+    <div id="toolbar" class="toolbar">
+      <button id="annotationToolButton" class="toolbar-btn">
+        ✏️ Annotation Tool
+      </button>
+    </div>
+    <script type="module" src="/src/main.ts"></script>
+    <script type="module" src="/src/script.ts"></script>
+  </body>
 </html>

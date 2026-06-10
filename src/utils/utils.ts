@@ -1,7 +1,7 @@
 import { dyno, SplatMesh } from "@sparkjsdev/spark";
 
 const effectParams = {
-  effect: "Magic"
+  effect: "Magic",
 };
 const animateT = dyno.dynoFloat(0);
 
@@ -75,10 +75,11 @@ export const setupSplatModifier = (splatMesh: SplatMesh) => {
                 pos.xz *= rot(t*.3);
                 return vec4(pos, smoothstep(-10., y, pos.y));
               }
-            `)
+            `),
         ],
         // Main effect shader logic
-        statements: ({ inputs, outputs }) => dyno.unindentLines(`
+        statements: ({ inputs, outputs }) =>
+          dyno.unindentLines(`
             ${outputs.gsplat} = ${inputs.gsplat};
             float t = ${inputs.t};
             float s = smoothstep(0.,10.,t-4.5)*10.;
@@ -143,13 +144,13 @@ export const setupSplatModifier = (splatMesh: SplatMesh) => {
       gsplat = d.apply({
         gsplat,
         t: animateT,
-        effectType: dyno.dynoInt(1)
+        effectType: dyno.dynoInt(1),
       }).gsplat;
 
       return { gsplat };
-    }
+    },
   );
 
   // Apply shader modifications to splat mesh
   splatMesh.updateGenerator();
-}
+};
