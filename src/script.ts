@@ -378,17 +378,14 @@ public async requestAnnotationFromGemini(box: number[]) {
 
         const data = await response.json();
         
-        // 2. Handle Sofas
-        if (data.sofa && Array.isArray(data.sofa)) {
-            data.sofa.forEach((item: any) => this.annotateDetectedObject(item.box, "Sofa"));
+        if (data.objects && Array.isArray(data.objects)) {
+            data.objects.forEach((item: any) => {
+                // item.label is now whatever the AI decided it was!
+                console.log(`Annotating detected object: ${item.label} at box ${item.box}`);
+                const label = item.label === "objects" ? "Detected Item" : item.label;
+                this.annotateDetectedObject(item.box, label);
+            });
         }
-        if (!data.sofa?.length) {
-            console.log("Gemini detected no objects in this area.");
-        }
-        // 3. Handle Frames
-        // if (data.frames) {
-        //     data.frames.forEach((item: any) => this.annotateDetectedObject(item.box, "Frame"));
-        // }
     } catch (err) {
         console.error("Annotation Error:", err);
     }
@@ -404,6 +401,6 @@ export async function loadWorld(url: string) {
 }
 
 // Initial load
-const initialURL = "/Apartment.sog";
+const initialURL = "/BiltmoreGaussianSplat.ply";
 // const initialURL = "/BiltmoreGaussianSplat.sog";
 loadWorld(initialURL);
