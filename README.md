@@ -88,7 +88,7 @@ This happens when Gemini returns empty results or chatty text.
 If images are coming through as "invalid format," ensure your `express.json` limit is set to at least `20mb`. Base64 snapshots are large.
 
 ## Current Configuration
-*   **Model:** `models/gemini-3.5-flash` (Update this in `server.ts` if your project's model list changes).
+*   **Model:** `models/gemini-3.5-flash`.
 *   **Classes Detected:** Chairs, Frames.
 
 ***
