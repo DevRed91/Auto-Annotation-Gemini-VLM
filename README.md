@@ -93,7 +93,3 @@ If images are coming through as "invalid format," ensure your `express.json` lim
 
 ***
 
-### How to use this file:
-1. Create a file named `README.md` in your `gemini-test` root folder.
-2. Paste the text above into it.
-3. If you eventually add more object classes (like tables or lamps), update the **Current Configuration** section so other developers know what the API supports.
