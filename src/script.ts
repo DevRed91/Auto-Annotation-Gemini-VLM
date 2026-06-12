@@ -11,6 +11,8 @@ import {
   initMobileControls,
   isMobileDevice,
 } from "./utils/mobileJoystick";
+import GeometricContextManager from "./GeometricContextManager/GeometricContextManager";
+import { SemanticToken } from "./utils/types";
 // import { OrbitControls } from "three/examples/jsm/Addons.js";
 
 const API_BASE_URL =
@@ -90,7 +92,35 @@ export class SplatViewer {
   private setupEventListeners() {
     window.addEventListener("resize", () => this.onWindowResize());
   }
+  private refreshUIFromMemory() {
+    // 1. Remove all current annotation elements from the DOM
+    this.annotations.forEach(ann => ann.element.remove());
+    this.annotations = [];
 
+    // 2. Get the "Validated" objects from Global Trajectory Memory
+    const activeObjects = this.geoContext.getActiveObjects();
+
+    // 3. Re-create UI elements only for confirmed objects
+    activeObjects.forEach(obj => {
+        this.createAnnotationElement(obj.worldPos, obj.label);
+    });
+}
+  private geoContext = new GeometricContextManager();
+  private processDetection(worldPos: THREE.Vector3, label: string) {
+    // Create a generic Semantic Token
+    const token: SemanticToken = {
+        id: THREE.MathUtils.generateUUID(),
+        label: label, // Use the dynamic label from Gemini
+        worldPos: worldPos,
+        confidence: 1.0,
+        timestamp: Date.now()
+    };
+
+    // The Manager handles the geometric logic regardless of label
+    this.geoContext.integrate(token);
+
+    this.refreshUIFromMemory();
+}
   private onWindowResize() {
     this.camera.aspect = window.innerWidth / window.innerHeight;
     this.camera.updateProjectionMatrix();
@@ -414,6 +444,7 @@ private async captureSnapshot(): Promise<string> {
         if (!detection?.label || !Array.isArray(detection.box) || detection.box.length !== 4) return;
         if (anchorWorldPos) {
           this.createAnnotationElement(anchorWorldPos.clone(), detection.label);
+          // this.processDetection(anchorWorldPos.clone(), detection.label);
           return;
         }
         this.annotateDetectedObject(detection.box as AnnotationDetection["box"], detection.label);
