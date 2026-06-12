@@ -124,6 +124,38 @@ p {
   box-shadow: 0 20px 25px -5px rgba(0, 122, 255, 0.4);
   filter: brightness(1.1);
 }
+.annotation-container {
+    position: absolute;
+    pointer-events: auto; /* Enable clicking! */
+    z-index: 1000;
+}
+
+.annotation-pin {
+    width: 20px;
+    height: 20px;
+    background: hsl(233, 97%, 47%);
+    border: 2px solid white;
+    border-radius: 50%;
+    cursor: pointer;
+    box-shadow: 0 0 10px rgba(0,0,0,0.5);
+}
+
+.annotation-card {
+    position: absolute;
+    top: 30px;
+    left: 0;
+    width: 200px;
+    background: white;
+    padding: 15px;
+    border-radius: 8px;
+    box-shadow: 0 4px 15px rgba(0,0,0,0.3);
+    color: #333;
+    font-family: sans-serif;
+}
+
+.annotation-card h3 { margin: 0 0 10px 0; font-size: 16px; }
+.annotation-card p { font-size: 12px; line-height: 1.4; margin-bottom: 10px; }
+.close-btn { background: #eee; border: none; padding: 5px 10px; cursor: pointer; border-radius: 4px; }
 
 @keyframes rotation {
   0% {
