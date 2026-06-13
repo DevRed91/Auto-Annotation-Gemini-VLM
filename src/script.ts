@@ -56,6 +56,7 @@ export class SplatViewer {
   private selectionBox: HTMLElement | null = null;
   private startPoint: { x: number; y: number } | null = null;
   private isSelecting = false;
+  private annotationLoadingEl: HTMLElement | null = null;
 
   constructor() {
     this.scene = new THREE.Scene();
@@ -84,7 +85,24 @@ export class SplatViewer {
     this.setupAnnotationUI();
     // this.setupSelectionBox();
     this.setupClickInteraction();
+    this.setupLoadingUI();
     this.startAnimationLoop();
+  }
+
+  private setupLoadingUI() {
+    const loadingEl = document.createElement("div");
+    loadingEl.className = "annotation-loading hidden";
+    loadingEl.innerHTML = `
+      <div class="annotation-loading__spinner"></div>
+      <span>Fetching annotation...</span>
+    `;
+    document.body.appendChild(loadingEl);
+    this.annotationLoadingEl = loadingEl;
+  }
+
+  private setAnnotationLoading(isLoading: boolean) {
+    if (!this.annotationLoadingEl) return;
+    this.annotationLoadingEl.classList.toggle("hidden", !isLoading);
   }
 
   private setupEventListeners() {
@@ -101,6 +119,7 @@ export class SplatViewer {
     let lastTime = performance.now();
     this.renderer.setAnimationLoop((time) => {
       this.controls.update(this.cameraRig);
+      this.camera.updateMatrixWorld(); 
       // this.lockCameraHeightToGround();
       const MOVE_SPEED = 2.0;
       const deltaTime = (time - lastTime) / 1000;
@@ -283,6 +302,30 @@ export class SplatViewer {
 
   //   this.annotations.push({ element: div, position });
   // }
+  private getDepthKernel(x: number, y: number): number {
+    const gl = this.renderer.getContext();
+    const kernelSize = 2; // 5x5 grid
+    let minDepth = 1.0;
+    const pixelBuffer = new Float32Array(1);
+    const canvasHeight = this.renderer.domElement.height;
+
+    for (let i = -kernelSize; i <= kernelSize; i++) {
+        for (let j = -kernelSize; j <= kernelSize; j++) {
+            const px = Math.max(0, Math.min(this.renderer.domElement.width - 1, x + i));
+            const py = Math.max(0, Math.min(this.renderer.domElement.height - 1, y + j));
+            
+            // WebGL coordinate flip: (0,0) is bottom-left in GL, top-left in Browser
+            const glY = canvasHeight - py;
+            
+            gl.readPixels(px, glY, 1, 1, gl.DEPTH_COMPONENT, gl.FLOAT, pixelBuffer);
+            
+            if (pixelBuffer[0] < minDepth && pixelBuffer[0] > 0) {
+                minDepth = pixelBuffer[0];
+            }
+        }
+    }
+    return minDepth;
+}
   private createAnnotationElement(position: THREE.Vector3, label: string) {
     const container = document.createElement('div');
     container.className = 'annotation-container';
@@ -384,6 +427,7 @@ private async captureSnapshot(): Promise<string> {
     clickWorldPosAtClick: THREE.Vector3 | null,
   ) {
     try {
+      this.setAnnotationLoading(true);
       const dataUrl = await this.captureSnapshot();
       const headers: Record<string, string> = { "Content-Type": "application/json" };
       if (BYPASS_TUNNEL_REMINDER) headers["bypass-tunnel-reminder"] = "true";
@@ -420,6 +464,8 @@ private async captureSnapshot(): Promise<string> {
       });
     } catch (err) {
       console.error("Museum Mode Error:", err);
+    } finally {
+      this.setAnnotationLoading(false);
     }
   }
 }

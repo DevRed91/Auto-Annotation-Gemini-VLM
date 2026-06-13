@@ -298,3 +298,28 @@ canvas {
   z-index: 20;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
 }
+
+.annotation-loading {
+  position: fixed;
+  top: 16px;
+  right: 16px;
+  z-index: 1100;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-radius: 999px;
+  background: rgba(2, 6, 23, 0.9);
+  color: #e5e7eb;
+  font-size: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+}
+
+.annotation-loading__spinner {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 2px solid rgba(255, 255, 255, 0.3);
+  border-top-color: #ffffff;
+  animation: rotation 0.8s linear infinite;
+}
