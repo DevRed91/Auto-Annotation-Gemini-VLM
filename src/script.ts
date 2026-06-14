@@ -148,22 +148,36 @@ export class SplatViewer {
     });
   }
 
-  private setupClickInteraction() {
-    this.renderer.domElement.addEventListener("click", (e) => {
-      // Only trigger if a specific tool is active (optional)
-      if (!this.isSelecting) return;
+private setupClickInteraction() {
+  this.renderer.domElement.addEventListener("click", (e) => {
+    if (!this.isSelecting) return;
 
-      const rect = this.renderer.domElement.getBoundingClientRect();
-      const x = (e.clientX - rect.left) / rect.width;
-      const y = (e.clientY - rect.top) / rect.height;
-      const clickWorldPos = this.getAnnotationPosition(x, y);
+    const rect = this.renderer.domElement.getBoundingClientRect();
+    const x = (e.clientX - rect.left) / rect.width;
+    const y = (e.clientY - rect.top) / rect.height;
 
-      console.log(`User clicked at: x=${x.toFixed(2)}, y=${y.toFixed(2)}`);
+    console.log(`User clicked at: x=${x.toFixed(2)}, y=${y.toFixed(2)}`);
+    
+    // 1. Get 3D position
+    const worldPos = this.getAnnotationPosition(x, y);
+
+    // 2. Check Spatial Memory
+    if (worldPos) {
+      const existing = this.geoContext.findExistingObject(worldPos);
       
-      // Trigger the new coordinate-based request
-      this.requestAnnotationFromGemini(x, y, clickWorldPos);
-    });
-  }
+      if (existing) {
+        console.log(`Spatial Memory: This is the ${existing.label}. Skipping API.`);
+        return; // Exit early: Do not call the API
+      }
+      
+      // 3. If no existing object, proceed to request from Gemini
+      console.log("No existing object found, querying Gemini...");
+      this.requestAnnotationFromGemini(x, y, worldPos);
+    } else {
+      console.warn("Click did not hit a valid surface (Depth = 1.0).");
+    }
+  });
+}
   private setupAnnotationUI() {
     const btn = document.getElementById("annotationToolButton");
     if (btn) {
@@ -297,22 +311,6 @@ export class SplatViewer {
     }
     return null;
   }
-  // Create a simple UI helper function
-  // private createAnnotationElement(position: THREE.Vector3, label: string) {
-  //   const div = document.createElement("div");
-  //   div.className = "annotation-label";
-  //   div.innerText = label;
-  //   div.style.position = "absolute";
-  //   div.style.zIndex = "1000"; // Ensure it's on top of canvas
-  //   div.style.pointerEvents = "none"; // So clicks pass through
-  //   div.style.backgroundColor = "rgba(0,0,0,0.6)";
-  //   div.style.color = "white";
-  //   div.style.padding = "4px 8px";
-  //   div.style.borderRadius = "4px";
-  //   document.body.appendChild(div);
-
-  //   this.annotations.push({ element: div, position });
-  // }
   private createAnnotationElement(position: THREE.Vector3, label: string) {
     const container = document.createElement('div');
     container.className = 'annotation-container';
@@ -375,39 +373,7 @@ private async captureSnapshot(): Promise<string> {
     
     return this.renderer.domElement.toDataURL("image/jpeg", 0.7);
 }
-// public async requestAnnotationFromGemini(box: number[]) {
-//     try {
-//         // const dataUrl = this.renderer.domElement.toDataURL("image/jpeg", 0.7);
-//         const dataUrl = await this.captureSnapshot();
-//         const headers: Record<string, string> = { "Content-Type": "application/json" };
 
-//         if (BYPASS_TUNNEL_REMINDER) {
-//           headers["bypass-tunnel-reminder"] = "true";
-//         }
-
-//         const endpoint = buildAnnotateEndpoint(API_BASE_URL);
-
-//         const response = await fetch(endpoint, {
-//             method: "POST",
-//             headers,
-//             body: JSON.stringify({ image: dataUrl, userBox: box }),
-//         });
-
-//         const data = await response.json();
-        
-//         if (data.objects && Array.isArray(data.objects)) {
-//             data.objects.forEach((item: any) => {
-//                 // item.label is now whatever the AI decided it was!
-//                 console.log(`Annotating detected object: ${item.label} at box ${item.box}`);
-//                 const label = item.label === "objects" ? "Detected Item" : item.label;
-//                 const description = item.description === "objects" ? "Detected Item" : item.description;
-//                 this.annotateDetectedObject(item.box, label, description);
-//             });
-//         }
-//     } catch (err) {
-//         console.error("Annotation Error:", err);
-//     }
-//   }
   public async requestAnnotationFromGemini(
     clickX: number,
     clickY: number,
