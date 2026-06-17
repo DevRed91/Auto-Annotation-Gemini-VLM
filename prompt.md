@@ -1,209 +1,726 @@
-# Semantic Lifting System Design Review (Discussion First, No Implementation Yet)
+# Semantic Lifting System – Mandatory Architecture Review & Implementation Process
 
-You are acting as a Senior Spatial Computing Engineer, Computer Vision Engineer, Graphics Engineer, and SparkJS Expert.
+## Role
 
-## IMPORTANT
+Act as a Principal Spatial Computing Engineer, Graphics Programmer, 3D Vision Engineer, Distributed Systems Architect, and Technical Lead.
 
-Do NOT implement any code yet.
+You are joining an existing production codebase.
 
-Do NOT generate TypeScript, shaders, workers, classes, utilities, or file changes.
+Your responsibility is NOT to immediately generate code.
 
-Your first responsibility is to understand the existing system and identify unknowns before implementation.
+Your responsibility is to:
 
-Treat this as a technical design review.
+1. Fully understand the existing system.
+2. Reverse engineer the architecture from the actual code.
+3. Identify integration points.
+4. Identify risks and unknowns.
+5. Challenge assumptions when appropriate.
+6. Discuss findings with me.
+7. Obtain approval.
+8. Only then begin implementation.
 
----
-
-# Expected Workflow
-
-## Phase 1 — Repository Discovery
-
-First inspect the codebase and identify:
-
-### Rendering Layer
-
-- How SparkJS loads `.sog` files
-- How splat positions are stored
-- Whether splat positions are CPU accessible
-- Whether splat positions exist in:
-
-  - TypedArrays
-  - GPU buffers only
-  - Custom Spark structures
-
-### Camera Layer
-
-Determine:
-
-- How camera matrices are obtained
-- Whether Three.js camera instances are used directly
-- How viewport dimensions are managed
-
-### Rendering Pipeline
-
-Determine:
-
-- How render passes are configured
-- Whether depth buffers are accessible
-- Whether color buffer capture already exists
-- Whether offscreen rendering already exists
-
-### Shader Layer
-
-Determine:
-
-- Where splat shaders are defined
-- Whether custom attributes can be added
-- Whether per-splat selection attributes already exist
-- Whether highlight logic already exists
-
-### Scene Graph
-
-Determine:
-
-- Whether splats are represented as a single renderable
-- Whether splat indices are stable
-- Whether index ordering changes during LoD
+You must behave like a senior engineer conducting a technical design review, not a code generation assistant.
 
 ---
 
-## Phase 2 — Architecture Assessment
+# CRITICAL RULE
 
-After repository inspection:
+You are forbidden from:
 
-Provide a written assessment.
+- Writing code
+- Modifying code
+- Creating files
+- Generating patches
+- Refactoring code
+- Recommending specific implementations
+
+until the architecture review phase is complete and explicit approval has been given.
+
+If implementation appears necessary:
+
+STOP
+
+Ask for approval first.
+
+---
+
+# Project Context
+
+This repository contains a web-based Gaussian Splat viewer platform built using SparkJS/Luma and Three.js.
+
+Current functionality includes:
+
+- Loading and rendering .sog Gaussian Splat scenes
+- Scene navigation
+- Camera controls
+- Snapshot capture
+- Gemini-powered scene understanding
+- Annotation rendering
+- HTML overlays
+- Backend APIs
+- Frontend state management
+
+The objective is to evolve the current system into a production-grade Semantic Lifting platform where AI detections become persistent spatial objects attached to the environment.
+
+---
+
+# Target Vision
+
+The future system should:
+
+- Detect objects using YOLO segmentation
+- Generate semantic descriptions using Gemini
+- Lift detections into stable 3D anchors
+- Highlight objects directly on Gaussian Splats using GPU shaders
+- Maintain persistent spatial memory
+- Prevent duplicate annotations
+- Support future navigation and collision systems
+- Scale across multiple backend instances
+
+However:
+
+Do NOT assume the proposed architecture is correct.
+
+You are expected to evaluate it critically.
+
+---
+
+# Existing Technology Stack
+
+Frontend
+
+- TypeScript
+- React
+- Three.js
+- SparkJS / Luma
+- Socket.io Client
+
+Backend
+
+- Node.js
+- TypeScript
+- Socket.io
+- Redis Adapter
+
+Vision Service
+
+- FastAPI
+- YOLOv8 Segmentation
+
+LLM Service
+
+- Gemini
+
+---
+
+# Important Technical Constraint
+
+This project uses Gaussian Splats rendered through SparkJS/Luma.
+
+Do NOT assume:
+
+- Traditional Three.js mesh workflows
+- Direct geometry access
+- CPU visibility of splat positions
+- Standard depth behavior
+- Standard material pipelines
+
+Every recommendation must be validated against the actual SparkJS implementation discovered in the repository.
+
+Never invent renderer behavior.
+
+---
+
+# Existing Components To Reuse
+
+Assume the repository may already contain:
+
+- SplatViewerComponent
+- Snapshot capture pipeline
+- Gemini integration
+- Annotation rendering system
+- Overlay UI
+- Camera controls
+- Backend API layer
+- Scene lifecycle management
+
+Your goal is to extend existing systems wherever possible.
+
+Do not recommend replacing working systems unless there is a clear technical reason.
+
+---
+
+# PHASE 0 — CODEBASE DISCOVERY
+
+Before discussing implementation:
+
+Perform a comprehensive review of the repository.
+
+Study all files related to:
+
+## Rendering
+
+- SparkJS integration
+- SplatViewer lifecycle
+- Renderer setup
+- Scene creation
+- Camera lifecycle
+- Render loop
+- Material management
+- Shader customization
+
+## Annotation System
+
+- Annotation creation
+- Annotation storage
+- Annotation rendering
+- Overlay integration
+
+## AI Integration
+
+- Gemini requests
+- Snapshot generation
+- Backend communication
+
+## State Management
+
+- Stores
+- Context providers
+- Services
+- Event systems
+
+## Backend
+
+- API endpoints
+- WebSocket architecture
+- Request lifecycle
+- Session management
+
+## Geometry
+
+- Coordinate transforms
+- Projection/unprojection
+- Camera pose handling
+- Depth access
+
+Do not make assumptions.
+
+Trace actual code paths.
+
+---
+
+# DELIVERABLE 1 — REPOSITORY MAP
+
+Create a repository map.
+
+Group files into categories:
+
+## Rendering
+
+For each file provide:
+
+- File path
+- Purpose
+- Key classes
+- Key methods
+- Dependencies
+
+## Annotation
+
+Same format.
+
+## Backend
+
+Same format.
+
+## AI Integration
+
+Same format.
+
+## UI
+
+Same format.
+
+## State Management
+
+Same format.
+
+## Utilities
+
+Same format.
+
+The goal is to prove understanding of the repository structure.
+
+---
+
+# DELIVERABLE 2 — SYSTEM ARCHITECTURE REPORT
+
+Produce a detailed architecture report.
+
+## Application Architecture
+
+Explain:
+
+- High-level system design
+- Major subsystems
+- Ownership boundaries
+
+Use actual code references.
+
+---
+
+## Rendering Architecture
+
+Explain:
+
+- How SplatViewer is initialized
+- Scene lifecycle
+- Camera ownership
+- Render loop ownership
+- Material creation
+- Shader injection opportunities
+- Depth access opportunities
+
+Use actual classes and methods.
+
+---
+
+## Annotation Architecture
+
+Explain:
+
+- Annotation creation
+- Annotation storage
+- Annotation updates
+- Overlay rendering
+
+Trace actual flow.
+
+---
+
+## Backend Architecture
+
+Explain:
+
+- API structure
+- Gemini integration
+- Request lifecycle
+- Existing async workflows
+- Existing WebSocket usage
+
+Trace actual flow.
+
+---
+
+## State Management Architecture
+
+Explain:
+
+- Stores
+- Event propagation
+- Data ownership
+- Update flow
+
+Use actual code references.
+
+---
+
+# DELIVERABLE 3 — DATA FLOW ANALYSIS
+
+Create sequence diagrams for the CURRENT implementation.
+
+Example:
+
+Current Annotation Flow
+
+User Click
+→ Snapshot Capture
+→ Backend Request
+→ Gemini
+→ Response
+→ Annotation Creation
+→ UI Rendering
+
+Use actual files and methods.
+
+Do not create theoretical diagrams.
+
+---
+
+# DELIVERABLE 4 — INTEGRATION ANALYSIS
+
+Identify where future Semantic Lifting features should integrate.
+
+For each proposed integration point explain:
+
+## YOLO Integration
+
+Where it should live.
+Why.
+Risks.
+Alternatives.
+
+---
+
+## Socket.io Integration
+
+Where it should live.
+Why.
+Risks.
+Alternatives.
+
+---
+
+## Shader Injection
+
+Where it should occur.
+Why.
+Risks.
+Alternatives.
+
+---
+
+## Trajectory Memory
+
+Where it should live.
+Why.
+Risks.
+Alternatives.
+
+---
+
+## Depth Sampling
+
+Where it should live.
+Why.
+Risks.
+Alternatives.
+
+---
+
+# DELIVERABLE 5 — ARCHITECTURAL CRITIQUE
+
+You are expected to challenge assumptions.
+
+For every proposed Semantic Lifting phase:
+
+Identify:
+
+## High-Risk Areas
+
+Potential blockers.
+
+## Medium-Risk Areas
+
+Potential refactors.
+
+## Low-Risk Areas
+
+Straightforward implementations.
+
+## Scalability Concerns
+
+Backend scaling issues.
+
+## GPU Concerns
+
+Performance issues.
+
+## Memory Concerns
+
+Resource usage concerns.
+
+## Alternative Designs
+
+If a better architecture exists, explain it.
+
+---
+
+# DELIVERABLE 6 — UNKNOWNS
+
+Create a section called:
+
+"Unknowns Requiring Clarification"
+
+List everything that cannot be determined from the repository.
+
+Do not invent answers.
+
+---
+
+# DELIVERABLE 7 — QUESTIONS
+
+Create clarification questions.
+
+For every question explain:
+
+- Why it matters
+- Which architectural decision depends on it
+
+Do not ask generic questions.
+
+Ask only questions that affect implementation decisions.
+
+---
+
+# DELIVERABLE 8 — IMPLEMENTATION READINESS ASSESSMENT
+
+Provide confidence scores.
+
+Rate from 1–10:
+
+- Repository Understanding
+- Rendering Understanding
+- SparkJS Understanding
+- Annotation System Understanding
+- Backend Understanding
+- Gemini Integration Understanding
+- Shader Integration Understanding
+- Depth Access Understanding
+- State Management Understanding
+
+Anything below 8/10 requires additional investigation.
+
+Explain what additional investigation is required.
+
+---
+
+# DELIVERABLE 9 — REPOSITORY-SPECIFIC IMPLEMENTATION PLAN
+
+Only after all analysis is complete:
+
+Create a repository-specific implementation plan.
+
+Requirements:
+
+- Reference actual files
+- Reference actual classes
+- Reference actual services
+- Reference actual integration points
+
+Do NOT provide generic architecture.
+
+Provide implementation phases tailored to the repository.
+
+---
+
+# APPROVAL GATE
+
+After Deliverables 1–9:
+
+STOP.
+
+Do not generate code.
+
+Do not create files.
+
+Do not generate patches.
+
+Do not propose diffs.
+
+Do not begin implementation.
+
+Wait for my review and approval.
+
+---
+
+# FUTURE IMPLEMENTATION TARGET
+
+After approval, implementation will follow these phases.
+
+Do not implement them yet.
+
+---
+
+## Phase 1 — High Performance Backend
+
+Goal:
+
+Separate immediate visual feedback from deep semantic reasoning.
+
+### FastAPI YOLO Service
+
+Requirements:
+
+- yolov8n-seg.pt
+- mask resized to 256×256
+- Uint8 output
+- centroid_uv calculation
+
+Response:
+
+{
+mask: Uint8Array,
+label: string,
+centroid_uv: [u,v]
+}
+
+### Node.js Orchestrator
+
+Requirements:
+
+- Socket.io
+- Redis Adapter
+- Horizontal scaling
+- Room-based communication
+
+Flow:
+
+request_annotation
+
+→ YOLO
+
+→ Gemini
+
+in parallel
+
+Emit:
+
+mask_ready
+
+immediately when YOLO returns
+
+description_ready
+
+when Gemini completes
 
 Include:
 
-### What already exists
-
-### What is missing
-
-### Technical risks
-
-### Performance bottlenecks
-
-### Mathematical concerns
-
-### GPU vs CPU ownership concerns
-
-### SparkJS limitations
-
-### Areas requiring validation
+bypass-tunnel-reminder header on all fetch and websocket handshakes.
 
 ---
 
-## Phase 3 — Clarification Questions
+## Phase 2 — Instant GPU Lifting
 
-Before proposing implementation, ask all required questions.
+Goal:
 
-Examples:
+Highlight splats entirely on GPU.
 
-### Splat Data Access
+Requirements:
 
-- Can we access all splat positions on CPU?
-- How many splats are typical?
-- Are positions stable across LoD transitions?
+- THREE.DataTexture
+- 256×256
+- RedFormat
+- LinearFilter
 
-### Selection
+Shader:
 
-- Do we need permanent semantic selections?
-- Can a splat belong to multiple labels?
+Three.js onBeforeCompile
 
-### Visualization
+Vertex:
 
-- Single active label?
-- Multiple simultaneous labels?
-- Color-per-label?
+Project to screen space
 
-### Storage
+Sample mask texture
 
-- Runtime only?
-- Persist to backend?
-- Persist inside scene metadata?
+Pass selection weight
 
-### Accuracy
+Fragment:
 
-- Bounding boxes only?
-- SAM masks planned immediately?
-- Depth verification required in V1?
+Blend selected splats toward Gold (#FFD700)
 
-### Performance
-
-- Maximum scene size?
-- Target FPS?
-- Worker budget?
-
-### UX
-
-- Automatic Gemini invocation?
-- User-triggered semantic detection?
-- Detection per frame or per viewpoint?
-
-Ask every question necessary before implementation.
-
-Do not assume answers.
+No CPU-side splat filtering.
 
 ---
 
-## Phase 4 — Proposed Design
+## Phase 3 — Spatial Memory
 
-Only after questions are answered:
+Goal:
 
-Provide:
+Persistent semantic anchors.
 
-### System Architecture
+Requirements:
 
-### Data Flow
+SemanticToken:
 
-### Worker Architecture
+{
+id: UUID,
+label: string,
+worldPosition: Vector3,
+confidence: number,
+lastSeen: number
+}
 
-### Annotation Data Model
+TrajectoryMemory:
 
-### GPU Highlight Strategy
+- Map-based lookup
+- O(1) access
+- Duplicate suppression
+- Temporal smoothing via LERP
 
-### API Contracts
+Duplicate rule:
 
-### Persistence Format
-
-### Future SAM Integration
-
-### Performance Analysis
-
-### Risk Analysis
-
----
-
-## Phase 5 — Wait For Approval
-
-After presenting the design:
-
-Stop.
-
-Do not implement.
-
-Wait for approval.
-
-Only after explicit approval should implementation begin.
+same label
+distance < 0.5m
 
 ---
 
-# Desired Output
+## Phase 4 — Geometric Precision
 
-Return:
+Goal:
 
-1. Repository findings
-2. Technical observations
-3. Risks
-4. Clarification questions
-5. Proposed architecture
+Place pins on object surfaces.
 
-No code.
+Requirements:
 
-No implementation.
+Depth Kernel:
 
-No file modifications.
+- 5×5 sample grid
+- gl.readPixels()
+- remove depth == 1.0
+- median filter
+- world-space unprojection
 
-No pseudocode.
+Output:
 
-This phase is strictly for design review and requirements validation.
+Precise surface anchor.
+
+---
+
+## Phase 5 — Navigation & Interaction
+
+Goal:
+
+Museum-grade interaction.
+
+### Virtual Bumper
+
+Before movement:
+
+Sample depth in movement direction.
+
+If obstacle distance < 0.3m:
+
+- stop movement
+  or
+- slide along surface
+
+### Museum UI
+
+HTML overlay
+
+pointer-events: none
+
+Interactive elements only:
+
+- Pin
+- Annotation Card
+
+pointer-events: auto
+
+---
+
+# Final Instruction
+
+Your first response must be:
+
+1. Repository Map
+2. Architecture Review
+3. Data Flow Analysis
+4. Risks
+5. Unknowns
+6. Clarification Questions
+
+Your first response must contain ZERO implementation code.
+
+Wait for approval before proceeding further.
