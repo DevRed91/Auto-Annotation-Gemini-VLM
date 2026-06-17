@@ -88,50 +88,49 @@ export default class GeometricContextManager {
   }
   private spatialDatabase: Map<string, Vector3[][]> = new Map();
 
-    public registerObjectPoints(className: string, rawPoints: Vector3[]) {
-        if (rawPoints.length < 10) return;
+  public registerObjectPoints(className: string, rawPoints: Vector3[]) {
+    if (rawPoints.length < 10) return;
 
-        const dataset = rawPoints.map(p => [p.x, p.y, p.z]);
-        const dbscan = new DBSCAN();
-        
-        // 0.4m radius, 10 points minimum to form a cluster
-        const clusters = dbscan.run(dataset, 0.4, 10);
+    const dataset = rawPoints.map((p) => [p.x, p.y, p.z]);
+    const dbscan = new DBSCAN();
 
-        if (!this.spatialDatabase.has(className)) {
-            this.spatialDatabase.set(className, []);
-        }
+    // 0.4m radius, 10 points minimum to form a cluster
+    const clusters = dbscan.run(dataset, 0.4, 10);
 
-        const instances = this.spatialDatabase.get(className)!;
-
-        for (const clusterIndices of clusters) {
-            const instancePoints = clusterIndices.map(idx => rawPoints[idx]);
-            instances.push(instancePoints);
-        }
+    if (!this.spatialDatabase.has(className)) {
+      this.spatialDatabase.set(className, []);
     }
 
-    public getTargetInstance(className: string, userPosition: Vector3) {
-        const instances = this.spatialDatabase.get(className);
-        if (!instances || instances.length === 0) return null;
+    const instances = this.spatialDatabase.get(className)!;
 
-        // Find the instance whose centroid is closest to the user
-        let bestInstance = instances[0];
-        let minDistance = Infinity;
-
-        instances.forEach(instance => {
-            const centroid = this.calculateCentroid(instance);
-            const dist = centroid.distanceTo(userPosition);
-            if (dist < minDistance) {
-                minDistance = dist;
-                bestInstance = instance;
-            }
-        });
-
-        const centroid = this.calculateCentroid(bestInstance);
-        const box = new Box3().setFromPoints(bestInstance);
-        const size = new Vector3();
-        box.getSize(size);
-
-        return { centroid, size };
+    for (const clusterIndices of clusters) {
+      const instancePoints = clusterIndices.map((idx) => rawPoints[idx]);
+      instances.push(instancePoints);
     }
+  }
 
+  public getTargetInstance(className: string, userPosition: Vector3) {
+    const instances = this.spatialDatabase.get(className);
+    if (!instances || instances.length === 0) return null;
+
+    // Find the instance whose centroid is closest to the user
+    let bestInstance = instances[0];
+    let minDistance = Infinity;
+
+    instances.forEach((instance) => {
+      const centroid = this.calculateCentroid(instance);
+      const dist = centroid.distanceTo(userPosition);
+      if (dist < minDistance) {
+        minDistance = dist;
+        bestInstance = instance;
+      }
+    });
+
+    const centroid = this.calculateCentroid(bestInstance);
+    const box = new Box3().setFromPoints(bestInstance);
+    const size = new Vector3();
+    box.getSize(size);
+
+    return { centroid, size };
+  }
 }

@@ -6,6 +6,7 @@ import {
   SplatMesh,
   dyno,
 } from "@sparkjsdev/spark";
+import { injectHighlightDyno, updateHighlightDynoUniforms, dynoMaskActive } from "./shader";
 import {
   getMobileInput,
   getMobileLook,
@@ -85,6 +86,8 @@ export class SplatViewer {
   private isSelecting = false;
   private socket: Socket | null = null;
   private pendingSocketAnchor: THREE.Vector3 | null = null;
+  private capturedProjectionMatrix: THREE.Matrix4 | null = null;
+  private capturedViewMatrix: THREE.Matrix4 | null = null;
 
   constructor() {
     this.scene = new THREE.Scene();
@@ -390,21 +393,21 @@ export class SplatViewer {
   }
 
   private setMaskActive(active: boolean) {
-    const splatMat =
-      (this.currentSplat as any)?.material ||
-      (this.currentSplat as any)?.mesh?.material;
-    if (splatMat && splatMat.uniforms.uMaskActive) {
-      splatMat.uniforms.uMaskActive.value = active ? 1.0 : 0.0;
-    }
+    // Dyno uniforms are reactive — updating the value propagates to the GPU automatically
+    dynoMaskActive.value = active ? 1.0 : 0.0;
   }
 
   private updateUniforms(texture: THREE.DataTexture) {
-    const splatMat =
-      (this.currentSplat as any)?.material ||
-      (this.currentSplat as any)?.mesh?.material;
-    if (splatMat && splatMat.uniforms) {
-      splatMat.uniforms.uMask.value = texture;
-      splatMat.uniforms.uMaskActive.value = 1.0;
+    if (this.capturedProjectionMatrix && this.capturedViewMatrix) {
+      updateHighlightDynoUniforms(
+        this.capturedProjectionMatrix,
+        this.capturedViewMatrix,
+        texture,
+        true
+      );
+    } else {
+      // No snapshot matrices yet — just activate the mask without projection
+      dynoMaskActive.value = 1.0;
     }
   }
 
@@ -436,6 +439,10 @@ export class SplatViewer {
     splat.quaternion.set(1, 0, 0, 0);
     splat.position.set(0, -1.5, 0);
     this.currentSplat = splat;
+
+    // Inject the Dyno highlight modifier into the SplatMesh generator pipeline
+    injectHighlightDyno(this.currentSplat);
+
     this.scene.add(this.currentSplat);
     this.splatLoaded = true;
 
@@ -539,11 +546,17 @@ export class SplatViewer {
     await new Promise((r) => requestAnimationFrame(r));
     this.renderer.getContext().finish();
 
+    const projectionMatrix = this.camera.projectionMatrix.clone();
+    const viewMatrix = this.camera.matrixWorldInverse.clone();
+
+    this.capturedProjectionMatrix = projectionMatrix;
+    this.capturedViewMatrix = viewMatrix;
+
     return {
       image: this.renderer.domElement.toDataURL("image/jpeg", 0.7),
       // CAPTURE MATRICES AT THIS INSTANT
-      projectionMatrix: this.camera.projectionMatrix.clone(),
-      viewMatrix: this.camera.matrixWorldInverse.clone(),
+      projectionMatrix,
+      viewMatrix,
     };
   }
   /**
