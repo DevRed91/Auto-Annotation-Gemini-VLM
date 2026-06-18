@@ -4,7 +4,17 @@ import * as THREE from "three";
 // 1. Declare module-level reactive Dyno variables for active state tracking.
 //    These are reactive "uniforms" that can be updated at any time and will
 //    automatically propagate to the GPU without needing to recompile the shader.
-export const dynoMask = dyno.dynoSampler2D(new THREE.Texture());
+// Create a safe 1×1 RGBA placeholder so the sampler uniform is always bound
+// to a valid GPU texture object before a real mask arrives. An uninitialized
+// THREE.Texture() has no image data and will fail validation on strict drivers.
+const _placeholderMaskTexture = new THREE.DataTexture(
+  new Uint8Array([0, 0, 0, 0]),
+  1,
+  1,
+  THREE.RGBAFormat
+);
+_placeholderMaskTexture.needsUpdate = true;
+export const dynoMask = dyno.dynoSampler2D(_placeholderMaskTexture);
 export const dynoMaskActive = dyno.dynoFloat(0.0);
 export const dynoCapturedProjection = dyno.dynoMat4(new THREE.Matrix4());
 export const dynoCapturedView = dyno.dynoMat4(new THREE.Matrix4());
@@ -62,7 +72,9 @@ export const highlightEffect = dyno.dynoBlock(
 
           // Guard against out-of-bounds texture bleeding
           if (uv.x >= 0.0 && uv.x <= 1.0 && uv.y >= 0.0 && uv.y <= 1.0) {
-            float maskVal = texture2D(${inputs.uMask}, uv).r;
+            // Use texture() — GLSL ES 3.00 (WebGL2) removed texture2D().
+            // Using the deprecated form is the direct cause of shader compile failure.
+            float maskVal = texture(${inputs.uMask}, uv).r;
 
             if (maskVal > 0.5) {
               vec3 goldGlow = vec3(1.0, 0.8, 0.0);
@@ -114,8 +126,28 @@ export function updateHighlightDynoUniforms(
   maskTexture: THREE.Texture,
   active: boolean
 ): void {
+  const image = (maskTexture as THREE.DataTexture).image as
+    | { data?: ArrayLike<number>; width?: number; height?: number }
+    | undefined;
+  const isTextureUsable =
+    !!image &&
+    typeof image.width === "number" &&
+    typeof image.height === "number" &&
+    image.width > 0 &&
+    image.height > 0 &&
+    !!image.data;
+
+  if (!active || !isTextureUsable) {
+    dynoMaskActive.value = 0.0;
+    return;
+  }
+
+  // Only activate after all three dependencies are confirmed valid.
+  // Updating the texture uniform before setting active=0 would leave the
+  // sampler pointing at a disposed texture on the next frame.
   dynoCapturedProjection.value.copy(capturedProjection);
   dynoCapturedView.value.copy(capturedView);
   dynoMask.value = maskTexture;
-  dynoMaskActive.value = active ? 1.0 : 0.0;
+  // Activate last so the GPU sees a consistent uniform state in the same frame.
+  dynoMaskActive.value = 1.0;
 }

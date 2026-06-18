@@ -86,6 +86,7 @@ export class SplatViewer {
   private isSelecting = false;
   private socket: Socket | null = null;
   private pendingSocketAnchor: THREE.Vector3 | null = null;
+  private latestMaskLabel: string | null = null;
   private capturedProjectionMatrix: THREE.Matrix4 | null = null;
   private capturedViewMatrix: THREE.Matrix4 | null = null;
 
@@ -162,8 +163,13 @@ export class SplatViewer {
       (data: { mask?: number[][]; label?: string }) => {
         console.log("YOLO Mask Received!");
         if (Array.isArray(data?.mask)) {
+          this.latestMaskLabel =
+            typeof data.label === "string" && data.label.trim()
+              ? data.label.trim().toLowerCase()
+              : null;
           this.updateGPUMask(data.mask);
         } else {
+          this.latestMaskLabel = null;
           this.setMaskActive(false);
         }
 
@@ -189,6 +195,22 @@ export class SplatViewer {
   }
 
   private geoContext = new GeometricContextManager();
+  private triggerDynoHighlightForLabel(label: string) {
+    const normalizedLabel = label.trim().toLowerCase();
+    if (!normalizedLabel || !this.maskTexture) {
+      this.setMaskActive(false);
+      return;
+    }
+
+    // If backend returned a label for the current mask, only activate when it matches.
+    if (this.latestMaskLabel && this.latestMaskLabel !== normalizedLabel) {
+      this.setMaskActive(false);
+      return;
+    }
+
+    this.updateUniforms(this.maskTexture);
+  }
+
   private processDetection(worldPos: THREE.Vector3, label: string) {
     // Create a generic Semantic Token
     const token: SemanticToken = {
@@ -201,6 +223,7 @@ export class SplatViewer {
 
     // The Manager handles the geometric logic regardless of label
     // this.geoContext.addToken(token);
+    this.triggerDynoHighlightForLabel(label);
     this.createAnnotationElement(worldPos, label);
 
     // this.refreshUIFromMemory();
@@ -336,11 +359,28 @@ export class SplatViewer {
     }
   }
   private maskTexture: THREE.DataTexture | null = null;
+  private static readonly EXPECTED_MASK_DIM = 128;
+
+  private clearMaskTexture() {
+    if (this.maskTexture) {
+      this.maskTexture.dispose();
+      this.maskTexture = null;
+    }
+    this.latestMaskLabel = null;
+  }
 
   public updateGPUMask(maskArray: number[][]) {
+    // Do not push mask uniforms until the splat pipeline has been initialized.
+    if (!this.splatLoaded || !this.currentSplat) {
+      this.clearMaskTexture();
+      this.setMaskActive(false);
+      return;
+    }
+
     // 1. Guard Clause: Check if mask exists and has content
     if (!maskArray || maskArray.length === 0 || !maskArray[0]) {
       console.warn("YOLO returned an empty or invalid mask.");
+      this.clearMaskTexture();
       this.setMaskActive(false);
       return;
     }
@@ -348,16 +388,53 @@ export class SplatViewer {
     // 2. Dynamic Dimension Detection
     const height = maskArray.length;
     const width = maskArray[0].length;
+    if (height <= 0 || width <= 0) {
+      console.warn("YOLO returned a zero-sized mask.");
+      this.clearMaskTexture();
+      this.setMaskActive(false);
+      return;
+    }
 
-    // 3. Safe Flattening Logic
-    const data = new Uint8Array(width * height);
+    if (
+      width !== SplatViewer.EXPECTED_MASK_DIM ||
+      height !== SplatViewer.EXPECTED_MASK_DIM
+    ) {
+      console.warn(
+        `Invalid mask dimensions: ${width}x${height}. Expected ${SplatViewer.EXPECTED_MASK_DIM}x${SplatViewer.EXPECTED_MASK_DIM}.`,
+      );
+      this.clearMaskTexture();
+      this.setMaskActive(false);
+      return;
+    }
+
+    // 3. Safe Flattening Logic — 4 bytes per pixel to match THREE.RGBAFormat.
+    // sampler2D on most GPU drivers requires RGBA data; .r in the shader still
+    // reads the red channel correctly.
+    const data = new Uint8Array(width * height * 4);
     for (let y = 0; y < height; y++) {
       const row = maskArray[y];
       // Check row integrity
-      if (!row) continue;
+      if (!Array.isArray(row) || row.length !== width) {
+        console.warn("YOLO returned a non-rectangular mask.");
+        this.clearMaskTexture();
+        this.setMaskActive(false);
+        return;
+      }
       for (let x = 0; x < width; x++) {
-        // Use 0.5 threshold for binary mask
-        data[y * width + x] = row[x] > 0.5 ? 255 : 0;
+        const value = row[x];
+        if (!Number.isFinite(value)) {
+          console.warn("YOLO returned a mask with non-numeric entries.");
+          this.clearMaskTexture();
+          this.setMaskActive(false);
+          return;
+        }
+        // Write into all 4 channels so the sampler always reads consistently.
+        const v = value > 0.5 ? 255 : 0;
+        const i = (y * width + x) * 4;
+        data[i] = v;     // R
+        data[i + 1] = v; // G
+        data[i + 2] = v; // B
+        data[i + 3] = 255; // A — always opaque
       }
     }
 
@@ -368,8 +445,7 @@ export class SplatViewer {
       (this.maskTexture.image.width !== width ||
         this.maskTexture.image.height !== height)
     ) {
-      this.maskTexture.dispose();
-      this.maskTexture = null;
+      this.clearMaskTexture();
     }
 
     if (!this.maskTexture) {
@@ -377,7 +453,7 @@ export class SplatViewer {
         data,
         width,
         height,
-        THREE.RedFormat,
+        THREE.RGBAFormat
       );
       this.maskTexture.minFilter = THREE.LinearFilter; // Smoothing
       this.maskTexture.magFilter = THREE.LinearFilter;
@@ -406,8 +482,8 @@ export class SplatViewer {
         true
       );
     } else {
-      // No snapshot matrices yet — just activate the mask without projection
-      dynoMaskActive.value = 1.0;
+      // Never activate mask sampling before snapshot matrices are available.
+      this.setMaskActive(false);
     }
   }
 
@@ -435,6 +511,9 @@ export class SplatViewer {
       this.scene.remove(this.currentSplat);
       this.currentSplat = null;
     }
+    this.clearMaskTexture();
+    this.setMaskActive(false);
+
     const splat = new SplatMesh({ url });
     splat.quaternion.set(1, 0, 0, 0);
     splat.position.set(0, -1.5, 0);
@@ -563,11 +642,13 @@ export class SplatViewer {
    * Validation guard for mask shape
    */
   private isValidMask(mask: any): mask is number[][] {
-    const EXPECTED_DIM = 128;
     return (
       Array.isArray(mask) &&
-      mask.length === EXPECTED_DIM &&
-      mask.every((row) => Array.isArray(row) && row.length === EXPECTED_DIM)
+      mask.length === SplatViewer.EXPECTED_MASK_DIM &&
+      mask.every(
+        (row) =>
+          Array.isArray(row) && row.length === SplatViewer.EXPECTED_MASK_DIM,
+      )
     );
   }
   public async runSofaColdStart(timeoutMs: number = 5000) {
