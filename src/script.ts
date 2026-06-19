@@ -11,6 +11,7 @@ import {
   initMobileControls,
   isMobileDevice,
 } from "./utils/mobileJoystick";
+import GeometricContextManager from "./GeometricContextManager/GeometricContextManager";
 // import { OrbitControls } from "three/examples/jsm/Addons.js";
 
 const API_BASE_URL =
@@ -39,6 +40,12 @@ interface AnnotationDetection {
   box: [number, number, number, number];
 }
 
+interface DimensionSet {
+  width: number;
+  height: number;
+  depth: number;
+}
+
 export class SplatViewer {
   private scene: THREE.Scene;
   private camera: THREE.PerspectiveCamera;
@@ -57,6 +64,9 @@ export class SplatViewer {
   private startPoint: { x: number; y: number } | null = null;
   private isSelecting = false;
   private annotationLoadingEl: HTMLElement | null = null;
+  private annotationToolButton: HTMLButtonElement | null = null;
+  private readonly geometricContext = new GeometricContextManager();
+  private activeBoxHelper: THREE.Box3Helper | null = null;
 
   constructor() {
     this.scene = new THREE.Scene();
@@ -156,12 +166,21 @@ export class SplatViewer {
   private setupAnnotationUI() {
     const btn = document.getElementById("annotationToolButton");
     if (btn) {
+      this.annotationToolButton = btn as HTMLButtonElement;
       btn.addEventListener("click", () => {
+        if ((btn as HTMLButtonElement).disabled) return;
         btn.classList.toggle("active");
         // FIX: Toggle the state
         this.isSelecting = btn.classList.contains("active");
       });
     }
+  }
+
+  private disableAnnotationToolButton() {
+    if (!this.annotationToolButton) return;
+    this.annotationToolButton.disabled = true;
+    this.annotationToolButton.classList.toggle("disabled", true);
+    this.isSelecting = false;
   }
   private updateAnnotationLabels() {
     this.annotations.forEach((ann) => {
@@ -326,7 +345,11 @@ export class SplatViewer {
     }
     return minDepth;
 }
-  private createAnnotationElement(position: THREE.Vector3, label: string) {
+  private createAnnotationElement(
+    position: THREE.Vector3,
+    label: string,
+    dimensions?: DimensionSet,
+  ) {
     const container = document.createElement('div');
     container.className = 'annotation-container';
     
@@ -339,6 +362,11 @@ export class SplatViewer {
     card.className = 'annotation-card';
     const title = document.createElement("h3");
     title.textContent = label;
+    if (dimensions) {
+      const dimensionsLine = document.createElement("p");
+      dimensionsLine.textContent = `${this.formatMeters(dimensions.width)} x ${this.formatMeters(dimensions.height)} x ${this.formatMeters(dimensions.depth)}`;
+      card.appendChild(dimensionsLine);
+    }
     const closeBtn = document.createElement("button");
     closeBtn.className = "close-btn";
     closeBtn.textContent = "Close";
@@ -362,6 +390,96 @@ export class SplatViewer {
 
     this.annotations.push({ element: container, position });
 }
+
+  private formatMeters(value: number): string {
+    return `${value.toFixed(2)}m`;
+  }
+
+  private sanitizeDetectionBox(
+    box: AnnotationDetection["box"],
+  ): AnnotationDetection["box"] | null {
+    if (!Array.isArray(box) || box.length !== 4) return null;
+    const clamped = box.map((value) =>
+      Number.isFinite(value) ? Math.min(1, Math.max(0, value)) : 0,
+    ) as AnnotationDetection["box"];
+    const [xmin, ymin, xmax, ymax] = clamped;
+    const width = xmax - xmin;
+    const height = ymax - ymin;
+    if (width < 0.02 || height < 0.02) {
+      return null;
+    }
+    return clamped;
+  }
+
+  private samplePointsFromBox(
+    box: AnnotationDetection["box"],
+    gridSize = 10,
+  ): THREE.Vector3[] {
+    const [xmin, ymin, xmax, ymax] = box;
+    const points: THREE.Vector3[] = [];
+
+    for (let row = 0; row < gridSize; row++) {
+      for (let col = 0; col < gridSize; col++) {
+        const u = (col + 0.5) / gridSize;
+        const v = (row + 0.5) / gridSize;
+        const sampleX = xmin + u * (xmax - xmin);
+        const sampleY = ymin + v * (ymax - ymin);
+        const worldPos = this.getAnnotationPosition(sampleX, sampleY);
+        if (worldPos) points.push(worldPos);
+      }
+    }
+
+    return points;
+  }
+
+  private renderMeasurementBox(points: THREE.Vector3[]) {
+    if (this.activeBoxHelper) {
+      this.scene.remove(this.activeBoxHelper);
+      this.activeBoxHelper = null;
+    }
+
+    if (points.length === 0) return;
+
+    const box = new THREE.Box3().setFromPoints(points);
+    const helper = new THREE.Box3Helper(box, 0x76a8ff);
+    this.scene.add(helper);
+    this.activeBoxHelper = helper;
+  }
+
+  private annotateFromDetection(
+    detection: AnnotationDetection,
+    clickWorldPosAtClick: THREE.Vector3 | null,
+  ) {
+    const sanitizedBox = this.sanitizeDetectionBox(detection.box);
+    if (!sanitizedBox) {
+      console.warn("Discarding invalid or tiny Gemini bounding box.", detection.box);
+      return;
+    }
+
+    const sampledPoints = this.samplePointsFromBox(sanitizedBox, 10);
+    const measured = this.geometricContext.registerAndMeasureObject(
+      detection.label,
+      sampledPoints,
+      { eps: 0.3, minPts: 10 },
+    );
+
+    if (measured) {
+      this.renderMeasurementBox(measured.points);
+      this.createAnnotationElement(
+        measured.centroid.clone(),
+        detection.label,
+        measured.dimensions,
+      );
+      return;
+    }
+
+    if (clickWorldPosAtClick) {
+      this.createAnnotationElement(clickWorldPosAtClick.clone(), detection.label);
+      return;
+    }
+
+    this.annotateDetectedObject(sanitizedBox, detection.label);
+  }
 
   private annotateDetectedObject(box: AnnotationDetection["box"], label: string) {
     const [xmin, ymin, xmax, ymax] = box;
@@ -444,24 +562,22 @@ private async captureSnapshot(): Promise<string> {
 
       if (!response.ok) throw new Error("Server error");
       const data = await response.json();
-      const detections: AnnotationDetection[] = Array.isArray(data)
-        ? data
-        : Array.isArray(data?.objects)
-          ? data.objects
-          : [];
-      if (!Array.isArray(data) && !Array.isArray(data?.objects)) {
-        console.warn("Expected annotation response array or data.objects array.", data);
+      this.disableAnnotationToolButton();
+      const detection: AnnotationDetection | null =
+        data && typeof data.label === "string" && Array.isArray(data.box)
+          ? data
+          : Array.isArray(data)
+            ? data[0] ?? null
+            : Array.isArray(data?.objects)
+              ? data.objects[0] ?? null
+              : null;
+
+      if (!detection?.label || !Array.isArray(detection.box)) {
+        console.warn("Expected single detection payload with label and box.", data);
+        return;
       }
 
-      const anchorWorldPos = clickWorldPosAtClick;
-      detections.forEach((detection) => {
-        if (!detection?.label || !Array.isArray(detection.box) || detection.box.length !== 4) return;
-        if (anchorWorldPos) {
-          this.createAnnotationElement(anchorWorldPos.clone(), detection.label);
-          return;
-        }
-        this.annotateDetectedObject(detection.box as AnnotationDetection["box"], detection.label);
-      });
+      this.annotateFromDetection(detection, clickWorldPosAtClick);
     } catch (err) {
       console.error("Museum Mode Error:", err);
     } finally {
