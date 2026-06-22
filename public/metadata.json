@@ -1,0 +1,28 @@
+
+  {
+  "couch": {
+    "name": "Grand Victorian Sofa",
+    "era": "Late 19th Century",
+    "style": "Gothic Revival",
+    "material": "Mahogany & Silk Damask",
+    "dimensions": "2.10m x 0.85m x 0.90m",
+    "description": "An exquisite specimen of late-nineteenth-century craftsmanship, featuring hand-carved mahogany scrollwork and original tufted silk upholstery."
+  },
+  "table": {
+    "name": "Regency-Style Armchair",
+    "era": "Early 19th Century",
+    "style": "Regency",
+    "material": "Gilded Walnut & Leather",
+    "dimensions": "0.75m x 0.80m x 0.95m",
+    "description": "An elegant drawing-room armchair displaying characteristic neoclassical lines, fluted legs, and rich gold-leaf accents."
+  },
+  "potted plant": {
+    "name": "Fiddle Leaf Fig",
+    "era": "Contemporary",
+    "style": "Modern Interior",
+    "material": "Organic Botanical",
+    "dimensions": "1.8m Height",
+    "description": "A vibrant Ficus Lyrata, commonly known as a Fiddle Leaf Fig. This specimen is a staple of modern interior design, known for its sculptural violin-shaped leaves and clean architectural silhouette."
+  }
+}
+

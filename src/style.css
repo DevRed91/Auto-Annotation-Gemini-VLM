@@ -328,3 +328,85 @@ canvas {
   border-top-color: #ffffff;
   animation: rotation 0.8s linear infinite;
 }
+.annotation-card {
+    width: 280px;
+    background: rgba(18, 18, 18, 0.85);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    border-radius: 12px;
+    color: #ffffff;
+    font-family: 'Outfit', sans-serif;
+    padding: 16px;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+    transition: opacity 0.2s ease-in-out, transform 0.2s ease-in-out;
+    transform: scale(0.95);
+    opacity: 0;
+}
+
+.annotation-card.active {
+    transform: scale(1);
+    opacity: 1;
+}
+
+.card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+    padding-bottom: 8px;
+    margin-bottom: 12px;
+}
+
+.card-header h3 {
+    margin: 0;
+    font-size: 16px;
+    font-weight: 600;
+    color: #ffd700; /* Gold museum accent */
+}
+
+.card-tag {
+    font-size: 10px;
+    background: rgba(255, 215, 0, 0.2);
+    color: #ffd700;
+    padding: 2px 6px;
+    border-radius: 4px;
+    text-transform: uppercase;
+    font-weight: bold;
+}
+
+.card-specs p {
+    margin: 4px 0;
+    font-size: 12px;
+    color: #cccccc;
+}
+
+.card-specs p strong {
+    color: #ffffff;
+}
+
+.card-description {
+    font-size: 12px;
+    line-height: 1.5;
+    color: #e0e0e0;
+    margin-top: 12px;
+    border-top: 1px solid rgba(255, 255, 255, 0.1);
+    padding-top: 8px;
+}
+
+.close-btn {
+    width: 100%;
+    background: rgba(255, 255, 255, 0.1);
+    border: none;
+    color: #ffffff;
+    padding: 8px;
+    border-radius: 6px;
+    font-size: 11px;
+    cursor: pointer;
+    margin-top: 12px;
+    transition: background 0.15s ease;
+}
+
+.close-btn:hover {
+    background: rgba(255, 255, 255, 0.2);
+}
