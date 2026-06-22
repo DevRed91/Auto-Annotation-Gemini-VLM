@@ -1,95 +1,341 @@
-# Semantic Lifting Backend for 3DGS
+# Refactor Plan Request: SplatViewer.ts Semantic Lifting Pipeline
 
-This backend service acts as the vision-intelligence engine for a Gaussian Splatting viewer. It processes 2D snapshots of a 3D scene and utilizes Google Gemini to perform semantic object detection (identifying chairs and photo frames).
+## Role
 
-## Overview
-This service provides an API endpoint that:
-1. Receives a Base64 image snapshot from the frontend.
-2. Applies spatial context (bounding boxes/click coordinates).
-3. Queries Gemini (Vision) to segment/identify objects.
-4. Returns structured JSON to the frontend for 3D "Lifting" (mapping 2D boxes to 3D world space).
+You are a Senior Frontend Engineer specializing in:
 
-## Tech Stack
-*   **Runtime:** Node.js
-*   **Framework:** Express.js
-*   **AI SDK:** `@google/generative-ai`
-*   **Language:** TypeScript/JavaScript
+* Three.js
+* SparkJS / Gaussian Splat rendering
+* Spatial Computing
+* TypeScript
+* Computer Vision pipelines
+* Production-grade frontend architecture
 
-## Prerequisites
-*   Node.js (v18+)
-*   An API Key from [Google AI Studio](https://aistudio.google.com/)
+---
 
-## Installation
+## IMPORTANT: REVIEW FIRST, DO NOT IMPLEMENT IMMEDIATELY
 
-1. Clone the repository and install dependencies:
-   ```bash
-   npm install
-   ```
+Before making any code changes:
 
-2. Create a `.env` file in the root directory:
-   ```text
-   GEMINI_API_KEY=your_actual_api_key_here
-   ```
+1. Read the entire `SplatViewer.ts` implementation.
 
-3. Start the development server:
-   ```bash
-   npm run dev
-   # OR
-   npx ts-node server.ts
-   ```
+2. Trace the complete annotation flow from:
 
-## Frontend API Configuration
+   * User click
+   * Screenshot capture
+   * Gemini API request
+   * Detection processing
+   * Point cloud lifting
+   * Measurement
+   * Annotation rendering
 
-Create a `.env` file in the frontend project root:
+3. Produce a detailed analysis containing:
 
-```text
-VITE_API_BASE_URL=/api
-VITE_BYPASS_TUNNEL_REMINDER=false
+### Existing Flow Analysis
+
+Identify:
+
+* Current click handling flow
+* Current API request flow
+* Current annotation rendering flow
+* Current measurement flow
+* Current DOM overlay creation flow
+
+### Redundant / Legacy Code
+
+List all:
+
+* Dead code
+* Unused methods
+* Duplicate logic
+* Commented-out implementations
+* Legacy annotation paths
+* Obsolete rendering methods
+
+### Refactor Impact Assessment
+
+Explain:
+
+* Which methods should be deleted
+* Which methods should be merged
+* Which methods should become the new source of truth
+* Any risks or hidden dependencies
+
+---
+
+## WAIT FOR APPROVAL
+
+Do not modify code after the analysis.
+
+Provide:
+
+1. Understanding of existing architecture
+2. Proposed refactor plan
+3. List of methods to delete
+4. List of methods to modify
+5. List of methods to keep
+
+Then stop and wait for approval.
+
+---
+
+# Refactor Objective
+
+After approval, refactor `SplatViewer.ts` into a single, unified Semantic Lifting pipeline.
+
+The final flow must be:
+
+User Click
+→ Gemini Request
+→ Depth-Kernel Lift
+→ DBSCAN Registration
+→ Measurement
+→ Annotation Rendering
+
+No parallel flows.
+No legacy code paths.
+No duplicate rendering systems.
+
+---
+
+# Architecture Requirements
+
+## Unified Rendering System
+
+Delete:
+
+* `triggerMuseumCard`
+* `createAnnotationElement`
+* `annotateDetectedObject`
+* `processDetection`
+
+Replace with:
+
+```ts
+private renderAnnotation(
+  worldPos: THREE.Vector3,
+  label: string,
+  description: string,
+  dimensions: THREE.Vector3
+): void
 ```
 
-Notes:
-- For local development with Vite proxy, keep `VITE_API_BASE_URL=/api`.
-- For deployed frontend + local backend tunnel, set `VITE_API_BASE_URL` to your public tunnel URL (for example `https://example.loca.lt`).
-- Set `VITE_BYPASS_TUNNEL_REMINDER=true` only if your tunnel provider requires that custom header.
+### renderAnnotation Responsibilities
 
-## API Documentation
+Must create:
 
-### `POST /api/annotate`
+* Annotation container
+* Pin marker
+* Expanded information card
 
-Analyzes an image snapshot to detect chairs and photo frames within a specific region.
+### Styling Requirements
 
-**Request Body:**
-```json
+Container:
+
+```css
+pointer-events: none;
+```
+
+Card:
+
+```css
+z-index: 2500;
+```
+
+### Metadata Structure
+
+Use:
+
+```ts
 {
-  "image": "data:image/jpeg;base64,...",
-  "userBox": [ymin, xmin, ymax, xmax] 
+  name: string;
+  description: string;
+  era: string;
+  material: string;
+  dimensions: string;
 }
 ```
 
-**Response:**
+---
+
+## Unified API Entry Point
+
+`requestAnnotationFromGemini(box: number[])`
+
+must become the ONLY entry point for Gemini annotation results.
+
+Expected API response:
+
 ```json
 {
-  "chairs": [{"box": [0.2, 0.3, 0.5, 0.4]}],
-  "frames": [{"box": [0.1, 0.8, 0.2, 0.9]}]
+  "objects": [
+    {
+      "label": "...",
+      "description": "...",
+      "box": [x1, y1, x2, y2]
+    }
+  ]
 }
 ```
 
-## Troubleshooting & FAQ
+Processing loop:
 
-### 1. "404 Not Found" Errors
-If you see a 404 in the terminal, it usually means your API Key does not have access to the model string provided in the code.
-*   **Solution:** Run a model discovery script to see your authorized models. Use the exact model name from your authorized list (e.g., `models/gemini-3.5-flash`).
+```ts
+for (const object of response.objects) {
+  await executeAnnotationPipeline(
+    object.box,
+    object.label,
+    object.description
+  );
+}
+```
 
-### 2. "No JSON found" Errors
-This happens when Gemini returns empty results or chatty text.
-*   **Solution:** Check your `server.ts` regex logic. Ensure the prompt explicitly tells the model: *"No markdown, no backticks, return ONLY raw JSON."*
+No alternate processing paths.
 
-### 3. Image Size Issues
-If images are coming through as "invalid format," ensure your `express.json` limit is set to at least `20mb`. Base64 snapshots are large.
+---
 
-## Current Configuration
-*   **Model:** `models/gemini-3.5-flash`.
-*   **Classes Detected:** Chairs, Frames.
+## Unified Processing Method
 
-***
+Implement:
 
+```ts
+private async executeAnnotationPipeline(
+  box: number[],
+  label: string,
+  description: string
+): Promise<void>
+```
+
+### Responsibilities
+
+#### Step 1 — Depth-Kernel Lift
+
+Use existing:
+
+```ts
+getAnnotationPosition(...)
+```
+
+to obtain 3D coordinates.
+
+#### Step 2 — DBSCAN Registration
+
+Use:
+
+```ts
+this.geometricContext.registerAndMeasureObject(...)
+```
+
+for semantic registration.
+
+#### Step 3 — Measurement
+
+Use:
+
+```ts
+THREE.Box3
+```
+
+for measurement extraction.
+
+#### Step 4 — Render
+
+If measurement succeeds:
+
+```ts
+renderAnnotation(...)
+```
+
+Otherwise:
+
+* Log failure
+* Do not render
+
+---
+
+# Cleanup Requirements
+
+Remove all commented-out code including:
+
+* Legacy `setupAnnotationUI`
+* Old `requestAnnotation...` implementations
+* Deprecated annotation workflows
+* Experimental rendering branches
+* Dead helper functions
+
+The final file should contain only active production code.
+
+---
+
+# Initialization Requirements
+
+Verify and clean initialization for:
+
+```ts
+this.annotations
+```
+
+and
+
+```ts
+this.metadataDB
+```
+
+Ensure:
+
+* No duplicate initialization
+* No stale references
+* No unused collections
+
+---
+
+# Network Requirements
+
+Gemini request must include:
+
+```ts
+headers["bypass-tunnel-reminder"] = "true";
+```
+
+when tunnel bypass is enabled.
+
+---
+
+# Success Criteria
+
+The final architecture must have:
+
+Single Click Handler
+→ Single API Entry Point
+→ Single Annotation Pipeline
+→ Single Render System
+
+There must be:
+
+* No duplicate annotation logic
+* No parallel rendering systems
+* No legacy methods
+* No commented-out debris
+* No dead code
+
+---
+
+# Deliverables
+
+Phase 1:
+
+* Existing code analysis
+* Architecture understanding
+* Refactor plan
+* Questions / risks
+
+STOP and wait for approval.
+
+Phase 2 (after approval):
+
+* Complete refactored `SplatViewer.ts`
+* Full file output
+* No placeholders
+* No pseudocode
+* No omitted sections
+* Production-ready TypeScript

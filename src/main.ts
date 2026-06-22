@@ -1,3 +1,5 @@
+/// <reference types="vite/client" />
+
 import "./style.css";
 import "./script.ts";
 import { loadWorld } from "./script";
@@ -42,7 +44,6 @@ function renderMainUI() {
   //   </div>
   // `
 
-  const controls = document.getElementById("controls")!;
   const generateBtn = document.getElementById(
     "generate-btn",
   ) as HTMLButtonElement;

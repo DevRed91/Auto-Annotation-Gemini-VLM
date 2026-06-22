@@ -1,3 +1,5 @@
+/// <reference types="vite/client" />
+
 import * as THREE from "three";
 import {
   SparkControls,
@@ -12,16 +14,12 @@ import {
   isMobileDevice,
 } from "./utils/mobileJoystick";
 import GeometricContextManager from "./GeometricContextManager/GeometricContextManager";
-// import { OrbitControls } from "three/examples/jsm/Addons.js";
 
 const API_BASE_URL =
   (import.meta.env.VITE_API_BASE_URL as string | undefined)?.replace(
     /\/+$/,
     "",
   ) || "/api";
-const BYPASS_TUNNEL_REMINDER =
-  (import.meta.env.VITE_BYPASS_TUNNEL_REMINDER as string | undefined) ===
-  "true";
 
 function buildAnnotateEndpoint(baseUrl: string): string {
   const normalized = baseUrl.replace(/\/+$/, "");
@@ -38,17 +36,6 @@ function buildAnnotateEndpoint(baseUrl: string): string {
   return `${normalized}/annotate`;
 }
 
-interface AnnotationDetection {
-  label: string;
-  box: [number, number, number, number];
-}
-
-interface DimensionSet {
-  width: number;
-  height: number;
-  depth: number;
-}
-
 export class SplatViewer {
   private scene: THREE.Scene;
   private camera: THREE.PerspectiveCamera;
@@ -56,20 +43,18 @@ export class SplatViewer {
   private spark: SparkRenderer;
   private controls: SparkControls;
   private currentSplat: SplatMesh | null = null;
-  private desiredCameraHeight = 0.15;
   private isMobile: boolean = isMobileDevice();
   private cameraRig = new THREE.Group();
   private animateT = dyno.dynoFloat(0);
   private baseTime = 0;
   private splatLoaded = false;
-  private annotations: { element: HTMLElement; position: THREE.Vector3 }[] = [];
-  private selectionBox: HTMLElement | null = null;
-  private startPoint: { x: number; y: number } | null = null;
+  private annotations: { element: HTMLElement; position: THREE.Vector3; id?: string }[] = [];
   private isSelecting = false;
   private annotationLoadingEl: HTMLElement | null = null;
   private annotationToolButton: HTMLButtonElement | null = null;
   private readonly geometricContext = new GeometricContextManager();
   private activeBoxHelper: THREE.Box3Helper | null = null;
+  private metadataDB: any = null;
 
   constructor() {
     this.scene = new THREE.Scene();
@@ -100,7 +85,6 @@ export class SplatViewer {
     this.setMobileControls();
     this.setupEventListeners();
     this.setupAnnotationUI();
-    // this.setupSelectionBox();
     this.setupClickInteraction();
     this.setupLoadingUI();
     this.startAnimationLoop();
@@ -137,7 +121,6 @@ export class SplatViewer {
     this.renderer.setAnimationLoop((time) => {
       this.controls.update(this.cameraRig);
       this.camera.updateMatrixWorld();
-      // this.lockCameraHeightToGround();
       const MOVE_SPEED = 2.0;
       const deltaTime = (time - lastTime) / 1000;
       lastTime = time;
@@ -153,7 +136,6 @@ export class SplatViewer {
       this.renderer.render(this.scene, this.camera);
     });
   }
-  private metadataDB: any = null;
 
   private async loadMetadata() {
     if (!this.metadataDB) {
@@ -162,22 +144,6 @@ export class SplatViewer {
     }
   }
 
-  // private setupClickInteraction() {
-  //   this.renderer.domElement.addEventListener("click", (e) => {
-  //     // Only trigger if a specific tool is active (optional)
-  //     if (!this.isSelecting) return;
-
-  //     const rect = this.renderer.domElement.getBoundingClientRect();
-  //     const x = (e.clientX - rect.left) / rect.width;
-  //     const y = (e.clientY - rect.top) / rect.height;
-  //     const clickWorldPos = this.getAnnotationPosition(x, y);
-
-  //     console.log(`User clicked at: x=${x.toFixed(2)}, y=${y.toFixed(2)}`);
-
-  //     // Trigger the new coordinate-based request
-  //     this.requestAnnotationFromGemini(x, y, clickWorldPos);
-  //   });
-  // }
   private setupAnnotationUI() {
     const btn = document.getElementById("annotationToolButton");
     if (btn) {
@@ -185,7 +151,6 @@ export class SplatViewer {
       btn.addEventListener("click", () => {
         if ((btn as HTMLButtonElement).disabled) return;
         btn.classList.toggle("active");
-        // FIX: Toggle the state
         this.isSelecting = btn.classList.contains("active");
       });
     }
@@ -197,20 +162,17 @@ export class SplatViewer {
     this.annotationToolButton.classList.toggle("disabled", true);
     this.isSelecting = false;
   }
+
   private updateAnnotationLabels() {
     this.annotations.forEach((ann) => {
-      // Check if element exists
       if (!ann.element) return;
 
-      // Project 3D point to NDC
       const pos = ann.position.clone().project(this.camera);
 
-      // Hide if behind camera (pos.z > 1) or out of frustum
       if (pos.z > 1) {
         ann.element.style.display = "none";
       } else {
         ann.element.style.display = "block";
-        // Convert NDC (-1 to 1) to screen pixels
         const x = (pos.x * 0.5 + 0.5) * window.innerWidth;
         const y = (-pos.y * 0.5 + 0.5) * window.innerHeight;
         ann.element.style.left = `${x}px`;
@@ -243,14 +205,12 @@ export class SplatViewer {
       const move = new THREE.Vector3(input.x, 0, input.y);
       move.multiplyScalar(moveSpeed * deltaTime);
       move.applyQuaternion(this.cameraRig.quaternion);
-      move.y = 0; // Stay grounded — don't let pitch affect vertical position
+      move.y = 0;
       this.cameraRig.position.add(move);
     }
   }
 
   private setMobileControls() {
-    // const info = document.getElementById('info');
-
     if (this.isMobile) {
       initMobileControls({
         joystickSize: 140,
@@ -272,7 +232,7 @@ export class SplatViewer {
 
     const plane = new THREE.Mesh(geometry, material);
     plane.name = "GroundPlane";
-    plane.rotation.x = -Math.PI / 2; // horizontal floor
+    plane.rotation.x = -Math.PI / 2;
     plane.position.set(0, -1.7, 0);
     plane.visible = true;
     plane.receiveShadow = false;
@@ -292,187 +252,22 @@ export class SplatViewer {
     this.scene.add(this.currentSplat);
     this.splatLoaded = true;
 
-    // setupSplatModifier(this.currentSplat);
     this.addGroundPlane();
   }
-  private lockCameraHeightToGround() {
-    // Game-style: keep the rig at a fixed height above the world origin (Y=0 ground).
-    // The camera sits at local Y=0 inside the rig, so the rig's Y IS the eye height.
-    this.cameraRig.position.y = this.desiredCameraHeight;
-  }
-  private getAnnotationPosition(
-    normalizedX: number,
-    normalizedY: number,
-  ): THREE.Vector3 | null {
-    // 1. Convert normalized 0-1 to NDC (-1 to 1)
-    const ndcX = normalizedX * 2 - 1;
-    const ndcY = -(normalizedY * 2 - 1);
 
-    const raycaster = new THREE.Raycaster();
-    raycaster.setFromCamera(new THREE.Vector2(ndcX, ndcY), this.camera);
-
-    // 2. Intersect with the SplatMesh
-    if (this.currentSplat) {
-      const intersects = raycaster.intersectObject(this.currentSplat);
-      if (intersects.length > 0) {
-        return intersects[0].point; // This is your 3D position
-      }
-    }
-    return null;
-  }
-  // Add these lines to SplatViewer class definition
-  private activeCard: HTMLElement | null = null;
-
-  private setupClickInteraction() {
-    this.renderer.domElement.addEventListener(
-      "click",
-      async (event: MouseEvent) => {
-        // Ignore if user is currently dragging/selecting
-        if (this.isSelecting) return;
-
-        // 1. Calculate Normalized Device Coordinates (NDC)
-        const rect = this.renderer.domElement.getBoundingClientRect();
-        const x = (event.clientX - rect.left) / rect.width;
-        const y = (event.clientY - rect.top) / rect.height;
-
-        const ndcX = x * 2 - 1;
-        const ndcY = -(y * 2 - 1);
-
-        // 2. Perform WebAssembly Raycast on SplatMesh (Conforms to THREE.Raycaster API)
-        const raycaster = new THREE.Raycaster();
-        raycaster.setFromCamera(new THREE.Vector2(ndcX, ndcY), this.camera);
-
-        const intersects: any[] = [];
-        if (this.currentSplat) {
-          // SparkJS SplatMesh synchronous raycast method
-          this.currentSplat.raycast(raycaster, intersects);
-        }
-
-        if (intersects.length > 0) {
-          const hitPoint = intersects[0].point;
-          console.log("Raycast hit at 3D Coordinate:", hitPoint);
-
-          // 3. Match 3D Point to DBSCAN Cluster
-          const matchedObject =
-            this.geometricContext.resolveInstanceAtPoint(hitPoint);
-
-          if (matchedObject) {
-            console.log(`Matched to Spatial ID: ${matchedObject.id}`);
-            // 4. Fetch JSON Metadata and Trigger Overlay
-            await this.triggerMuseumCard(
-              matchedObject.id,
-              event.clientX,
-              event.clientY,
-            );
-          } else {
-            this.dismissActiveCard();
-          }
-        } else {
-          this.dismissActiveCard();
-        }
-      },
-    );
-  }
-
-  /**
-   * Fetches corresponding metadata from JSON file and renders a floating DOM card
-   */
-  private async triggerMuseumCard(
-    objectId: string,
-    screenX: number,
-    screenY: number,
-  ) {
-    this.dismissActiveCard();
-
-    try {
-      // Fetch local JSON metadata database
-      const response = await fetch("/metadata.json");
-      if (!response.ok) throw new Error("Metadata file unreachable");
-      const metadataDB = await response.json();
-
-      const itemData = metadataDB[objectId];
-      if (!itemData) {
-        console.warn(`No metadata found for ID: ${objectId}`);
-        return;
-      }
-
-      // Create the card container
-      const card = document.createElement("div");
-      card.className = "annotation-card active";
-      card.style.position = "absolute";
-      card.style.left = `${screenX + 20}px`; // Offset slightly from cursor
-      card.style.top = `${screenY - 50}px`;
-      card.style.zIndex = "2500";
-
-      // Structured Museum Content
-      card.innerHTML = `
-            <div class="card-header">
-                <h3>${itemData.name}</h3>
-                <span class="card-tag">${itemData.style}</span>
-            </div>
-            <div class="card-specs">
-                <p><strong>Era:</strong> ${itemData.era}</p>
-                <p><strong>Material:</strong> ${itemData.material}</p>
-                <p><strong>Dimensions:</strong> ${itemData.dimensions}</p>
-            </div>
-            <p class="card-description">${itemData.description}</p>
-            <button class="close-btn">Dismiss</button>
-        `;
-
-      // Event listener to dismiss Card
-      card.querySelector(".close-btn")?.addEventListener("click", (e) => {
-        e.stopPropagation();
-        this.dismissActiveCard();
-      });
-
-      document.body.appendChild(card);
-      this.activeCard = card;
-    } catch (err) {
-      console.error("Failed to load museum card:", err);
-    }
-  }
-
-  private dismissActiveCard() {
-    if (this.activeCard) {
-      this.activeCard.remove();
-      this.activeCard = null;
-    }
-  }
-  // Create a simple UI helper function
-  // private createAnnotationElement(position: THREE.Vector3, label: string) {
-  //   const div = document.createElement("div");
-  //   div.className = "annotation-label";
-  //   div.innerText = label;
-  //   div.style.position = "absolute";
-  //   div.style.zIndex = "1000"; // Ensure it's on top of canvas
-  //   div.style.pointerEvents = "none"; // So clicks pass through
-  //   div.style.backgroundColor = "rgba(0,0,0,0.6)";
-  //   div.style.color = "white";
-  //   div.style.padding = "4px 8px";
-  //   div.style.borderRadius = "4px";
-  //   document.body.appendChild(div);
-
-  //   this.annotations.push({ element: div, position });
-  // }
   private getDepthKernel(x: number, y: number): number {
     const gl = this.renderer.getContext();
-    const kernelSize = 2; // 5x5 grid
+    const kernelSize = 2;
     let minDepth = 1.0;
     const pixelBuffer = new Float32Array(1);
+    const canvasWidth = this.renderer.domElement.width;
     const canvasHeight = this.renderer.domElement.height;
 
     for (let i = -kernelSize; i <= kernelSize; i++) {
       for (let j = -kernelSize; j <= kernelSize; j++) {
-        const px = Math.max(
-          0,
-          Math.min(this.renderer.domElement.width - 1, x + i),
-        );
-        const py = Math.max(
-          0,
-          Math.min(this.renderer.domElement.height - 1, y + j),
-        );
+        const px = Math.max(0, Math.min(canvasWidth - 1, x + i));
+        const py = Math.max(0, Math.min(canvasHeight - 1, y + j));
 
-        // WebGL coordinate flip: (0,0) is bottom-left in GL, top-left in Browser
         const glY = canvasHeight - py;
 
         gl.readPixels(px, glY, 1, 1, gl.DEPTH_COMPONENT, gl.FLOAT, pixelBuffer);
@@ -484,122 +279,167 @@ export class SplatViewer {
     }
     return minDepth;
   }
-  private async createAnnotationElement(
-    position: THREE.Vector3,
-    label: string,
-    dimensions?: DimensionSet,
-  ) {
-    const response = await fetch("/metadata.json");
-        if (!response.ok) throw new Error("Metadata file unreachable");
-        const metadataDB = await response.json();
-        const itemData = metadataDB[objectId];
-        if (!itemData) {
-            console.warn(`No metadata found for ID: ${objectId}`);
-            return;
+
+  private getAnnotationPosition(
+    normalizedX: number,
+    normalizedY: number,
+  ): THREE.Vector3 | null {
+    const canvasWidth = this.renderer.domElement.width;
+    const canvasHeight = this.renderer.domElement.height;
+    const px = Math.round(normalizedX * canvasWidth);
+    const py = Math.round(normalizedY * canvasHeight);
+
+    const depth = this.getDepthKernel(px, py);
+    if (depth >= 0.999) {
+      return null;
+    }
+
+    const ndcX = normalizedX * 2 - 1;
+    const ndcY = -(normalizedY * 2 - 1);
+
+    const raycaster = new THREE.Raycaster();
+    raycaster.setFromCamera(new THREE.Vector2(ndcX, ndcY), this.camera);
+
+    if (this.currentSplat) {
+      const intersects: THREE.Intersection[] = [];
+      this.currentSplat.raycast(raycaster, intersects);
+      if (intersects.length > 0) {
+        return intersects[0].point;
+      }
+    }
+    return null;
+  }
+
+  private setupClickInteraction() {
+    this.renderer.domElement.addEventListener(
+      "click",
+      async (event: MouseEvent) => {
+        const rect = this.renderer.domElement.getBoundingClientRect();
+        const x = (event.clientX - rect.left) / rect.width;
+        const y = (event.clientY - rect.top) / rect.height;
+
+        if (this.isSelecting) {
+          await this.requestAnnotationFromGemini(undefined, x, y);
+          return;
         }
-    const container = document.createElement("div");
-    container.className = "annotation-container";
 
-    // Create the "Pin" (the dot)
-    const pin = document.createElement("div");
-    pin.className = "annotation-pin";
+        const ndcX = x * 2 - 1;
+        const ndcY = -(y * 2 - 1);
 
-    // Create the "Card" (the info)
-    // const card = document.createElement("div");
-    // card.className = "annotation-card";
-    // const title = document.createElement("h3");
-    // title.textContent = label;
-    // if (dimensions) {
-    //   const dimensionsLine = document.createElement("h3");
-    //   dimensionsLine.textContent = `${this.formatMeters(dimensions.width)} x ${this.formatMeters(dimensions.height)} x ${this.formatMeters(dimensions.depth)}`;
-    //   card.appendChild(dimensionsLine);
-    // }
-    // const closeBtn = document.createElement("button");
-    // closeBtn.className = "close-btn";
-    // closeBtn.textContent = "Close";
-    // card.appendChild(title);
-    // card.appendChild(closeBtn);
-    // card.style.display = "none"; // Hidden by default
-    // Create the card container
-        const card = document.createElement("div");
-        card.className = "annotation-card active";
-        card.style.position = "absolute";
-        card.style.left = `${screenX + 20}px`; // Offset slightly from cursor
-        card.style.top = `${screenY - 50}px`;
-        card.style.zIndex = "2500";
+        const raycaster = new THREE.Raycaster();
+        raycaster.setFromCamera(new THREE.Vector2(ndcX, ndcY), this.camera);
 
-        // Structured Museum Content
-        card.innerHTML = `
-            <div class="card-header">
-                <h3>${itemData.name}</h3>
-                <span class="card-tag">${itemData.style}</span>
-            </div>
-            <div class="card-specs">
-                <p><strong>Era:</strong> ${itemData.era}</p>
-                <p><strong>Material:</strong> ${itemData.material}</p>
-                <p><strong>Dimensions:</strong> ${itemData.dimensions}</p>
-            </div>
-            <p class="card-description">${itemData.description}</p>
-            <button class="close-btn">Dismiss</button>
-        `;
+        const intersects: THREE.Intersection[] = [];
+        if (this.currentSplat) {
+          this.currentSplat.raycast(raycaster, intersects);
+        }
 
+        if (intersects.length > 0) {
+          const hitPoint = intersects[0].point;
+          const matchedObject =
+            this.geometricContext.resolveInstanceAtPoint(hitPoint);
 
-    // Interaction: Toggle card on pin click
-    pin.onclick = (e) => {
-      e.stopPropagation();
-      card.style.display = card.style.display === "none" ? "block" : "none";
+          if (matchedObject) {
+            const ann = this.annotations.find((a) => a.id === matchedObject.id);
+            if (ann) {
+              const card = ann.element.querySelector(
+                ".annotation-card",
+              ) as HTMLElement;
+              if (card) {
+                card.style.display =
+                  card.style.display === "none" ? "block" : "none";
+              }
+            }
+          } else {
+            this.dismissActiveCards();
+          }
+        } else {
+          this.dismissActiveCards();
+        }
+      },
+    );
+  }
+
+  private dismissActiveCards() {
+    this.annotations.forEach((ann) => {
+      const card = ann.element.querySelector(
+        ".annotation-card",
+      ) as HTMLElement;
+      if (card) {
+        card.style.display = "none";
+      }
+    });
+  }
+
+  private renderAnnotation(
+    worldPos: THREE.Vector3,
+    label: string,
+    description: string,
+    dimensions: THREE.Vector3,
+    id?: string,
+  ) {
+    this.annotations.forEach((ann) => {
+      ann.element.remove();
+    });
+    this.annotations = [];
+
+    const key = label.toLowerCase().trim();
+    const meta = (this.metadataDB && this.metadataDB[key]) || {
+      name: label,
+      description: description || "No description available.",
+      era: "Contemporary",
+      material: "Modern Materials",
     };
 
-    closeBtn.addEventListener("click", () => {
-      card.style.display = "none";
+    const formattedDimensions = `${dimensions.x.toFixed(2)}m x ${dimensions.y.toFixed(2)}m x ${dimensions.z.toFixed(2)}m`;
+
+    const container = document.createElement("div");
+    container.className = "annotation-container";
+    container.style.position = "absolute";
+    container.style.pointerEvents = "none";
+
+    const pin = document.createElement("div");
+    pin.className = "annotation-pin";
+    pin.style.pointerEvents = "auto";
+
+    const card = document.createElement("div");
+    card.className = "annotation-card active";
+    card.style.position = "absolute";
+    card.style.zIndex = "2500";
+    card.style.pointerEvents = "auto";
+    card.style.display = "none";
+
+    card.innerHTML = `
+      <div class="card-header">
+        <h3>${meta.name || label}</h3>
+      </div>
+      <div class="card-specs">
+        <p><strong>Era:</strong> ${meta.era || "Unknown Era"}</p>
+        <p><strong>Material:</strong> ${meta.material || "Unknown Material"}</p>
+        <p><strong>Dimensions:</strong> ${meta.dimensions || formattedDimensions}</p>
+      </div>
+      <p class="card-description">${meta.description || description}</p>
+      <button class="close-btn">Dismiss</button>
+    `;
+
+    pin.addEventListener("click", (e) => {
+      e.stopPropagation();
+      card.style.display = card.style.display === "none" ? "block" : "none";
     });
+
+    const closeBtn = card.querySelector(".close-btn");
+    if (closeBtn) {
+      closeBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        card.style.display = "none";
+      });
+    }
 
     container.appendChild(pin);
     container.appendChild(card);
     document.body.appendChild(container);
 
-    this.annotations.push({ element: container, position });
-  }
-
-  private formatMeters(value: number): string {
-    return `${value.toFixed(2)}m`;
-  }
-
-  private sanitizeDetectionBox(
-    box: AnnotationDetection["box"],
-  ): AnnotationDetection["box"] | null {
-    if (!Array.isArray(box) || box.length !== 4) return null;
-    const clamped = box.map((value) =>
-      Number.isFinite(value) ? Math.min(1, Math.max(0, value)) : 0,
-    ) as AnnotationDetection["box"];
-    const [xmin, ymin, xmax, ymax] = clamped;
-    const width = xmax - xmin;
-    const height = ymax - ymin;
-    if (width < 0.02 || height < 0.02) {
-      return null;
-    }
-    return clamped;
-  }
-
-  private samplePointsFromBox(
-    box: AnnotationDetection["box"],
-    gridSize = 10,
-  ): THREE.Vector3[] {
-    const [xmin, ymin, xmax, ymax] = box;
-    const points: THREE.Vector3[] = [];
-
-    for (let row = 0; row < gridSize; row++) {
-      for (let col = 0; col < gridSize; col++) {
-        const u = (col + 0.5) / gridSize;
-        const v = (row + 0.5) / gridSize;
-        const sampleX = xmin + u * (xmax - xmin);
-        const sampleY = ymin + v * (ymax - ymin);
-        const worldPos = this.getAnnotationPosition(sampleX, sampleY);
-        if (worldPos) points.push(worldPos);
-      }
-    }
-
-    return points;
+    this.annotations.push({ element: container, position: worldPos, id });
   }
 
   private renderMeasurementBox(points: THREE.Vector3[]) {
@@ -616,167 +456,109 @@ export class SplatViewer {
     this.activeBoxHelper = helper;
   }
 
-  private annotateFromDetection(
-    detection: AnnotationDetection,
-    clickWorldPosAtClick: THREE.Vector3 | null,
+  private async executeAnnotationPipeline(
+    box: number[],
+    label: string,
+    description: string,
   ) {
-    const sanitizedBox = this.sanitizeDetectionBox(detection.box);
-    if (!sanitizedBox) {
-      console.warn(
-        "Discarding invalid or tiny Gemini bounding box.",
-        detection.box,
-      );
-      return;
+    const sampledPoints: THREE.Vector3[] = [];
+    const gridSize = 10;
+    const [xmin, ymin, xmax, ymax] = box;
+
+    for (let row = 0; row < gridSize; row++) {
+      for (let col = 0; col < gridSize; col++) {
+        const u = (col + 0.5) / gridSize;
+        const v = (row + 0.5) / gridSize;
+        const sampleX = xmin + u * (xmax - xmin);
+        const sampleY = ymin + v * (ymax - ymin);
+        const worldPos = this.getAnnotationPosition(sampleX, sampleY);
+        if (worldPos) {
+          sampledPoints.push(worldPos);
+        }
+      }
     }
 
-    const sampledPoints = this.samplePointsFromBox(sanitizedBox, 10);
     const measured = this.geometricContext.registerAndMeasureObject(
-      detection.label,
+      label,
       sampledPoints,
       { eps: 0.3, minPts: 10 },
     );
 
     if (measured) {
+      this.geometricContext.registerObjectPoints(label, measured.points);
+
+      const matchedInstance =
+        this.geometricContext.resolveInstanceAtPoint(measured.centroid);
+      const uniqueId = matchedInstance ? matchedInstance.id : undefined;
+
       this.renderMeasurementBox(measured.points);
-      this.createAnnotationElement(
-        measured.centroid.clone(),
-        detection.label,
-        measured.dimensions,
+
+      const dimensionsVec = new THREE.Vector3(
+        measured.dimensions.width,
+        measured.dimensions.height,
+        measured.dimensions.depth,
       );
-      return;
-    }
 
-    if (clickWorldPosAtClick) {
-      this.createAnnotationElement(
-        clickWorldPosAtClick.clone(),
-        detection.label,
+      this.renderAnnotation(
+        measured.centroid,
+        label,
+        description,
+        dimensionsVec,
+        uniqueId,
       );
-      return;
-    }
-
-    this.annotateDetectedObject(sanitizedBox, detection.label);
-  }
-
-  private annotateDetectedObject(
-    box: AnnotationDetection["box"],
-    label: string,
-    description: string
-  ) {
-    const [xmin, ymin, xmax, ymax] = box;
-    const centerX = (xmin + xmax) / 2;
-    const centerY = (ymin + ymax) / 2;
-
-    const worldPos = this.getAnnotationPosition(centerX, centerY);
-    if (worldPos) {
-      this.createAnnotationElement(worldPos, label, description);
     } else {
-      console.warn(`Lifting failed for ${label}`);
+      console.warn("Measurement failed for pipeline:", label);
     }
   }
 
   private async captureSnapshot(): Promise<string> {
-    // 1. Force a render to ensure scene is up to date
     this.renderer.render(this.scene, this.camera);
-
-    // 2. Wait for GPU buffer sync
     await new Promise((resolve) => requestAnimationFrame(resolve));
-
-    // 3. Optional: Force GPU finish if necessary (very safe, prevents black screens)
     this.renderer.getContext().finish();
-
     return this.renderer.domElement.toDataURL("image/jpeg", 0.7);
   }
-  // public async requestAnnotationFromGemini(box: number[]) {
-  //     try {
-  //         // const dataUrl = this.renderer.domElement.toDataURL("image/jpeg", 0.7);
-  //         const dataUrl = await this.captureSnapshot();
-  //         const headers: Record<string, string> = { "Content-Type": "application/json" };
 
-  //         if (BYPASS_TUNNEL_REMINDER) {
-  //           headers["bypass-tunnel-reminder"] = "true";
-  //         }
-
-  //         const endpoint = buildAnnotateEndpoint(API_BASE_URL);
-
-  //         const response = await fetch(endpoint, {
-  //             method: "POST",
-  //             headers,
-  //             body: JSON.stringify({ image: dataUrl, userBox: box }),
-  //         });
-
-  //         const data = await response.json();
-
-  //         if (data.objects && Array.isArray(data.objects)) {
-  //             data.objects.forEach((item: any) => {
-  //                 // item.label is now whatever the AI decided it was!
-  //                 console.log(`Annotating detected object: ${item.label} at box ${item.box}`);
-  //                 const label = item.label === "objects" ? "Detected Item" : item.label;
-  //                 const description = item.description === "objects" ? "Detected Item" : item.description;
-  //                 this.annotateDetectedObject(item.box, label, description);
-  //             });
-  //         }
-  //     } catch (err) {
-  //         console.error("Annotation Error:", err);
-  //     }
-  //   }
   public async requestAnnotationFromGemini(
-    clickX: number,
-    clickY: number,
-    clickWorldPosAtClick: THREE.Vector3 | null,
+    box?: number[],
+    clickX?: number,
+    clickY?: number,
   ) {
     try {
       await this.loadMetadata();
       this.setAnnotationLoading(true);
-      const dataUrl = await this.captureSnapshot();
-      const headers: Record<string, string> = {
-        "Content-Type": "application/json",
-      };
-      if (BYPASS_TUNNEL_REMINDER) headers["bypass-tunnel-reminder"] = "true";
 
-      const response = await fetch(buildAnnotateEndpoint(API_BASE_URL), {
+      const dataUrl = await this.captureSnapshot();
+      const headers = {
+        "Content-Type": "application/json",
+        "bypass-tunnel-reminder": "true",
+      };
+
+      const endpoint = buildAnnotateEndpoint(API_BASE_URL);
+
+      const requestBody: Record<string, any> = { image: dataUrl };
+      if (box) {
+        requestBody.userBox = box;
+      } else if (clickX !== undefined && clickY !== undefined) {
+        requestBody.clickX = clickX;
+        requestBody.clickY = clickY;
+      }
+
+      const response = await fetch(endpoint, {
         method: "POST",
         headers,
-        body: JSON.stringify({
-          image: dataUrl,
-          clickX: clickX,
-          clickY: clickY,
-        }),
+        body: JSON.stringify(requestBody),
       });
 
       if (!response.ok) throw new Error("Server error");
-      const data = await response.json();
+      const item = await response.json();
+
       this.disableAnnotationToolButton();
-      // const detection: AnnotationDetection | null =
-      // data && typeof data.label === "string" && Array.isArray(data.box)
-      //   ? data
-      //   : Array.isArray(data)
-      //     ? (data[0] ?? null)
-      //     : Array.isArray(data?.objects)
-      //       ? (data.objects[0] ?? null)
-      //       : null;
-
-      // if (!detection?.label || !Array.isArray(detection.box)) {
-      //   console.warn(
-      //     "Expected single detection payload with label and box.",
-      //     data,
-      //   );
-      //   return;
-      // }
-
-      // this.annotateFromDetection(detection, clickWorldPosAtClick);
-      if (data.objects) {
-        data.objects.forEach((item: any) => {
-          // Get metadata using the label as the key
-          const labelKey = item.label.toLowerCase(); // Ensure case-insensitive match
-          const meta = this.metadataDB[labelKey] || {
-            name: item.label,
-            description: "No museum description available.",
-          };
-
-          // Annotate with the enriched data
-          // this.annotateDetectedObject(item.box, meta.name, meta.description);
-        });
-      }
+      const label = item.label || "Detected Item";
+      const description = item.description || "No description available.";
+      const itemBox = item.box || box;
+      if (itemBox) {
+            this.executeAnnotationPipeline(itemBox, label, description);
+          }
     } catch (err) {
       console.error("Museum Mode Error:", err);
     } finally {
@@ -785,15 +567,11 @@ export class SplatViewer {
   }
 }
 
-// Create singleton instance
 export const viewer = new SplatViewer();
 
-// Export loadWorld for compatibility with main.ts
 export async function loadWorld(url: string) {
   return viewer.loadWorld(url);
 }
 
-// Initial load
 const initialURL = "/Apartment.sog";
-// const initialURL = "/BiltmoreGaussianSplat.sog";
 loadWorld(initialURL);
