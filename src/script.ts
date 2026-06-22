@@ -15,10 +15,13 @@ import GeometricContextManager from "./GeometricContextManager/GeometricContextM
 // import { OrbitControls } from "three/examples/jsm/Addons.js";
 
 const API_BASE_URL =
-  (import.meta.env.VITE_API_BASE_URL as string | undefined)?.replace(/\/+$/, "") ||
-  "/api";
+  (import.meta.env.VITE_API_BASE_URL as string | undefined)?.replace(
+    /\/+$/,
+    "",
+  ) || "/api";
 const BYPASS_TUNNEL_REMINDER =
-  (import.meta.env.VITE_BYPASS_TUNNEL_REMINDER as string | undefined) === "true";
+  (import.meta.env.VITE_BYPASS_TUNNEL_REMINDER as string | undefined) ===
+  "true";
 
 function buildAnnotateEndpoint(baseUrl: string): string {
   const normalized = baseUrl.replace(/\/+$/, "");
@@ -82,7 +85,11 @@ export class SplatViewer {
     this.cameraRig.rotateY(Math.PI);
     this.scene.add(this.cameraRig);
 
-    this.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, preserveDrawingBuffer: true });
+    this.renderer = new THREE.WebGLRenderer({
+      antialias: true,
+      alpha: true,
+      preserveDrawingBuffer: true,
+    });
     this.renderer.setSize(window.innerWidth, window.innerHeight);
     this.renderer.setPixelRatio(window.devicePixelRatio);
     document.body.appendChild(this.renderer.domElement);
@@ -129,7 +136,7 @@ export class SplatViewer {
     let lastTime = performance.now();
     this.renderer.setAnimationLoop((time) => {
       this.controls.update(this.cameraRig);
-      this.camera.updateMatrixWorld(); 
+      this.camera.updateMatrixWorld();
       // this.lockCameraHeightToGround();
       const MOVE_SPEED = 2.0;
       const deltaTime = (time - lastTime) / 1000;
@@ -158,7 +165,7 @@ export class SplatViewer {
       const clickWorldPos = this.getAnnotationPosition(x, y);
 
       console.log(`User clicked at: x=${x.toFixed(2)}, y=${y.toFixed(2)}`);
-      
+
       // Trigger the new coordinate-based request
       this.requestAnnotationFromGemini(x, y, clickWorldPos);
     });
@@ -329,37 +336,43 @@ export class SplatViewer {
     const canvasHeight = this.renderer.domElement.height;
 
     for (let i = -kernelSize; i <= kernelSize; i++) {
-        for (let j = -kernelSize; j <= kernelSize; j++) {
-            const px = Math.max(0, Math.min(this.renderer.domElement.width - 1, x + i));
-            const py = Math.max(0, Math.min(this.renderer.domElement.height - 1, y + j));
-            
-            // WebGL coordinate flip: (0,0) is bottom-left in GL, top-left in Browser
-            const glY = canvasHeight - py;
-            
-            gl.readPixels(px, glY, 1, 1, gl.DEPTH_COMPONENT, gl.FLOAT, pixelBuffer);
-            
-            if (pixelBuffer[0] < minDepth && pixelBuffer[0] > 0) {
-                minDepth = pixelBuffer[0];
-            }
+      for (let j = -kernelSize; j <= kernelSize; j++) {
+        const px = Math.max(
+          0,
+          Math.min(this.renderer.domElement.width - 1, x + i),
+        );
+        const py = Math.max(
+          0,
+          Math.min(this.renderer.domElement.height - 1, y + j),
+        );
+
+        // WebGL coordinate flip: (0,0) is bottom-left in GL, top-left in Browser
+        const glY = canvasHeight - py;
+
+        gl.readPixels(px, glY, 1, 1, gl.DEPTH_COMPONENT, gl.FLOAT, pixelBuffer);
+
+        if (pixelBuffer[0] < minDepth && pixelBuffer[0] > 0) {
+          minDepth = pixelBuffer[0];
         }
+      }
     }
     return minDepth;
-}
+  }
   private createAnnotationElement(
     position: THREE.Vector3,
     label: string,
     dimensions?: DimensionSet,
   ) {
-    const container = document.createElement('div');
-    container.className = 'annotation-container';
-    
+    const container = document.createElement("div");
+    container.className = "annotation-container";
+
     // Create the "Pin" (the dot)
-    const pin = document.createElement('div');
-    pin.className = 'annotation-pin';
-    
+    const pin = document.createElement("div");
+    pin.className = "annotation-pin";
+
     // Create the "Card" (the info)
-    const card = document.createElement('div');
-    card.className = 'annotation-card';
+    const card = document.createElement("div");
+    card.className = "annotation-card";
     const title = document.createElement("h3");
     title.textContent = label;
     if (dimensions) {
@@ -372,16 +385,16 @@ export class SplatViewer {
     closeBtn.textContent = "Close";
     card.appendChild(title);
     card.appendChild(closeBtn);
-    card.style.display = 'none'; // Hidden by default
+    card.style.display = "none"; // Hidden by default
 
     // Interaction: Toggle card on pin click
     pin.onclick = (e) => {
-        e.stopPropagation();
-        card.style.display = card.style.display === 'none' ? 'block' : 'none';
+      e.stopPropagation();
+      card.style.display = card.style.display === "none" ? "block" : "none";
     };
 
-    closeBtn.addEventListener('click', () => {
-        card.style.display = 'none';
+    closeBtn.addEventListener("click", () => {
+      card.style.display = "none";
     });
 
     container.appendChild(pin);
@@ -389,7 +402,7 @@ export class SplatViewer {
     document.body.appendChild(container);
 
     this.annotations.push({ element: container, position });
-}
+  }
 
   private formatMeters(value: number): string {
     return `${value.toFixed(2)}m`;
@@ -413,11 +426,28 @@ export class SplatViewer {
 
   private samplePointsFromBox(
     box: AnnotationDetection["box"],
-    gridSize = 10,
+    // gridSize = 10,
   ): THREE.Vector3[] {
     const [xmin, ymin, xmax, ymax] = box;
     const points: THREE.Vector3[] = [];
+    // Adaptive sampling: scale grid resolution based on the 2D bounding box area
+    const width = xmax - xmin;
+    const height = ymax - ymin;
+    const area = width * height;
 
+    const minGridSize = 6;
+    const maxGridSize = 25;
+    const gridSize = Math.max(
+      minGridSize,
+      Math.min(
+        maxGridSize,
+        Math.round(minGridSize + (maxGridSize - minGridSize) * Math.sqrt(area)),
+      ),
+    );
+
+    console.log(
+      `[Adaptive Sampling] Box Area: ${area.toFixed(4)}, Selected Grid Size: ${gridSize}x${gridSize} (${gridSize * gridSize} rays)`,
+    );
     for (let row = 0; row < gridSize; row++) {
       for (let col = 0; col < gridSize; col++) {
         const u = (col + 0.5) / gridSize;
@@ -452,11 +482,14 @@ export class SplatViewer {
   ) {
     const sanitizedBox = this.sanitizeDetectionBox(detection.box);
     if (!sanitizedBox) {
-      console.warn("Discarding invalid or tiny Gemini bounding box.", detection.box);
+      console.warn(
+        "Discarding invalid or tiny Gemini bounding box.",
+        detection.box,
+      );
       return;
     }
 
-    const sampledPoints = this.samplePointsFromBox(sanitizedBox, 10);
+    const sampledPoints = this.samplePointsFromBox(sanitizedBox);
     const measured = this.geometricContext.registerAndMeasureObject(
       detection.label,
       sampledPoints,
@@ -474,71 +507,77 @@ export class SplatViewer {
     }
 
     if (clickWorldPosAtClick) {
-      this.createAnnotationElement(clickWorldPosAtClick.clone(), detection.label);
+      this.createAnnotationElement(
+        clickWorldPosAtClick.clone(),
+        detection.label,
+      );
       return;
     }
 
     this.annotateDetectedObject(sanitizedBox, detection.label);
   }
 
-  private annotateDetectedObject(box: AnnotationDetection["box"], label: string) {
+  private annotateDetectedObject(
+    box: AnnotationDetection["box"],
+    label: string,
+  ) {
     const [xmin, ymin, xmax, ymax] = box;
     const centerX = (xmin + xmax) / 2;
     const centerY = (ymin + ymax) / 2;
 
     const worldPos = this.getAnnotationPosition(centerX, centerY);
     if (worldPos) {
-        this.createAnnotationElement(worldPos, label);
+      this.createAnnotationElement(worldPos, label);
     } else {
-        console.warn(`Lifting failed for ${label}`);
+      console.warn(`Lifting failed for ${label}`);
     }
-}
+  }
 
-private async captureSnapshot(): Promise<string> {
+  private async captureSnapshot(): Promise<string> {
     // 1. Force a render to ensure scene is up to date
     this.renderer.render(this.scene, this.camera);
-    
+
     // 2. Wait for GPU buffer sync
-    await new Promise(resolve => requestAnimationFrame(resolve));
-    
+    await new Promise((resolve) => requestAnimationFrame(resolve));
+
     // 3. Optional: Force GPU finish if necessary (very safe, prevents black screens)
-    this.renderer.getContext().finish(); 
-    
+    this.renderer.getContext().finish();
+
     return this.renderer.domElement.toDataURL("image/jpeg", 0.7);
-}
-// public async requestAnnotationFromGemini(box: number[]) {
-//     try {
-//         // const dataUrl = this.renderer.domElement.toDataURL("image/jpeg", 0.7);
-//         const dataUrl = await this.captureSnapshot();
-//         const headers: Record<string, string> = { "Content-Type": "application/json" };
+  }
+  // public async requestAnnotationFromGemini(box: number[]) {
+  //     try {
+  //         // const dataUrl = this.renderer.domElement.toDataURL("image/jpeg", 0.7);
+  //         const dataUrl = await this.captureSnapshot();
+  //         const headers: Record<string, string> = { "Content-Type": "application/json" };
 
-//         if (BYPASS_TUNNEL_REMINDER) {
-//           headers["bypass-tunnel-reminder"] = "true";
-//         }
+  //         if (BYPASS_TUNNEL_REMINDER) {
+  //           headers["bypass-tunnel-reminder"] = "true";
+  //         }
 
-//         const endpoint = buildAnnotateEndpoint(API_BASE_URL);
+  //         const endpoint = buildAnnotateEndpoint(API_BASE_URL);
 
-//         const response = await fetch(endpoint, {
-//             method: "POST",
-//             headers,
-//             body: JSON.stringify({ image: dataUrl, userBox: box }),
-//         });
+  //         const response = await fetch(endpoint, {
+  //             method: "POST",
+  //             headers,
+  //             body: JSON.stringify({ image: dataUrl, userBox: box }),
+  //         });
 
-//         const data = await response.json();
-        
-//         if (data.objects && Array.isArray(data.objects)) {
-//             data.objects.forEach((item: any) => {
-//                 // item.label is now whatever the AI decided it was!
-//                 console.log(`Annotating detected object: ${item.label} at box ${item.box}`);
-//                 const label = item.label === "objects" ? "Detected Item" : item.label;
-//                 const description = item.description === "objects" ? "Detected Item" : item.description;
-//                 this.annotateDetectedObject(item.box, label, description);
-//             });
-//         }
-//     } catch (err) {
-//         console.error("Annotation Error:", err);
-//     }
-//   }
+  //         const data = await response.json();
+
+  //         if (data.objects && Array.isArray(data.objects)) {
+  //             data.objects.forEach((item: any) => {
+  //                 // item.label is now whatever the AI decided it was!
+  //                 console.log(`Annotating detected object: ${item.label} at box ${item.box}`);
+  //                 const label = item.label === "objects" ? "Detected Item" : item.label;
+  //                 const description = item.description === "objects" ? "Detected Item" : item.description;
+  //                 this.annotateDetectedObject(item.box, label, description);
+  //             });
+  //         }
+  //     } catch (err) {
+  //         console.error("Annotation Error:", err);
+  //     }
+  //   }
   public async requestAnnotationFromGemini(
     clickX: number,
     clickY: number,
@@ -547,16 +586,18 @@ private async captureSnapshot(): Promise<string> {
     try {
       this.setAnnotationLoading(true);
       const dataUrl = await this.captureSnapshot();
-      const headers: Record<string, string> = { "Content-Type": "application/json" };
+      const headers: Record<string, string> = {
+        "Content-Type": "application/json",
+      };
       if (BYPASS_TUNNEL_REMINDER) headers["bypass-tunnel-reminder"] = "true";
 
       const response = await fetch(buildAnnotateEndpoint(API_BASE_URL), {
         method: "POST",
         headers,
-        body: JSON.stringify({ 
-          image: dataUrl, 
-          clickX: clickX, 
-          clickY: clickY 
+        body: JSON.stringify({
+          image: dataUrl,
+          clickX: clickX,
+          clickY: clickY,
         }),
       });
 
@@ -567,13 +608,16 @@ private async captureSnapshot(): Promise<string> {
         data && typeof data.label === "string" && Array.isArray(data.box)
           ? data
           : Array.isArray(data)
-            ? data[0] ?? null
+            ? (data[0] ?? null)
             : Array.isArray(data?.objects)
-              ? data.objects[0] ?? null
+              ? (data.objects[0] ?? null)
               : null;
 
       if (!detection?.label || !Array.isArray(detection.box)) {
-        console.warn("Expected single detection payload with label and box.", data);
+        console.warn(
+          "Expected single detection payload with label and box.",
+          data,
+        );
         return;
       }
 
