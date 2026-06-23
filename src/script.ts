@@ -376,7 +376,7 @@ export class SplatViewer {
     const title = document.createElement("h3");
     title.textContent = label;
     if (dimensions) {
-      const dimensionsLine = document.createElement("p");
+      const dimensionsLine = document.createElement("h3");
       dimensionsLine.textContent = `${this.formatMeters(dimensions.width)} x ${this.formatMeters(dimensions.height)} x ${this.formatMeters(dimensions.depth)}`;
       card.appendChild(dimensionsLine);
     }
@@ -384,7 +384,7 @@ export class SplatViewer {
     closeBtn.className = "close-btn";
     closeBtn.textContent = "Close";
     card.appendChild(title);
-    card.appendChild(closeBtn);
+    // card.appendChild(closeBtn);
     card.style.display = "none"; // Hidden by default
 
     // Interaction: Toggle card on pin click
