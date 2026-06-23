@@ -1,95 +1,128 @@
-# Semantic Lifting Backend for 3DGS
+# Gaussian Splat Frontend
 
-This backend service acts as the vision-intelligence engine for a Gaussian Splatting viewer. It processes 2D snapshots of a 3D scene and utilizes Google Gemini to perform semantic object detection (identifying chairs and photo frames).
+This project is a Vite-based frontend for viewing and annotating Gaussian splat scenes in the browser. It renders the scene with Three.js and Spark, supports mobile controls, and includes an annotation flow that can lift 2D detections into 3D world-space measurements.
 
-## Overview
-This service provides an API endpoint that:
-1. Receives a Base64 image snapshot from the frontend.
-2. Applies spatial context (bounding boxes/click coordinates).
-3. Queries Gemini (Vision) to segment/identify objects.
-4. Returns structured JSON to the frontend for 3D "Lifting" (mapping 2D boxes to 3D world space).
+## What the app does
+
+The frontend currently provides:
+
+1. Scene loading from a local splat asset or a generated world URL.
+2. Click-based annotation mode for selecting objects in the viewport.
+3. Snapshot-based annotation requests to a companion `/api/annotate` endpoint.
+4. 2D-to-3D lifting using raycasts into the active splat scene.
+5. Measurement clustering with DBSCAN before dimensions are shown in the UI.
 
 ## Tech Stack
-*   **Runtime:** Node.js
-*   **Framework:** Express.js
-*   **AI SDK:** `@google/generative-ai`
-*   **Language:** TypeScript/JavaScript
+
+- Vite
+- TypeScript
+- Three.js
+- `@sparkjsdev/spark`
+- `density-clustering`
 
 ## Prerequisites
-*   Node.js (v18+)
-*   An API Key from [Google AI Studio](https://aistudio.google.com/)
+
+- Node.js 18 or newer
+- npm
 
 ## Installation
 
-1. Clone the repository and install dependencies:
-   ```bash
-   npm install
-   ```
+```bash
+npm install
+```
 
-2. Create a `.env` file in the root directory:
-   ```text
-   GEMINI_API_KEY=your_actual_api_key_here
-   ```
+## Development
 
-3. Start the development server:
-   ```bash
-   npm run dev
-   # OR
-   npx ts-node server.ts
-   ```
+```bash
+npm run dev
+```
 
-## Frontend API Configuration
+Open the Vite dev server URL in your browser after startup.
 
-Create a `.env` file in the frontend project root:
+## Build
+
+```bash
+npm run build
+```
+
+## Preview Production Build
+
+```bash
+npm run preview
+```
+
+## Runtime Flow
+
+The current frontend flow is:
+
+1. `src/main.ts` renders the landing UI and wires the optional World Labs generation controls.
+2. `src/script.ts` creates the Three.js scene, camera, renderer, and splat viewer.
+3. `loadWorld(...)` loads a splat into the scene.
+4. Annotation mode captures click coordinates and snapshots.
+5. The app sends the snapshot and click position to `/api/annotate`.
+6. Returned detections are sampled across the Gemini box.
+7. Sampled points are raycast into world space.
+8. `GeometricContextManager.registerAndMeasureObject(...)` clusters the points with DBSCAN.
+9. The largest cluster is used to build a `THREE.Box3` measurement and display dimensions in the UI.
+
+## Environment Variables
+
+Create a `.env` file in the project root.
 
 ```text
 VITE_API_BASE_URL=/api
 VITE_BYPASS_TUNNEL_REMINDER=false
 ```
 
-Notes:
-- For local development with Vite proxy, keep `VITE_API_BASE_URL=/api`.
-- For deployed frontend + local backend tunnel, set `VITE_API_BASE_URL` to your public tunnel URL (for example `https://example.loca.lt`).
-- Set `VITE_BYPASS_TUNNEL_REMINDER=true` only if your tunnel provider requires that custom header.
+### `VITE_API_BASE_URL`
 
-## API Documentation
+Base URL for the annotation service.
 
-### `POST /api/annotate`
+- Use `/api` for local development with a proxy.
+- Use a full tunnel or backend URL when the annotation service is hosted elsewhere.
 
-Analyzes an image snapshot to detect chairs and photo frames within a specific region.
+### `VITE_BYPASS_TUNNEL_REMINDER`
 
-**Request Body:**
-```json
-{
-  "image": "data:image/jpeg;base64,...",
-  "userBox": [ymin, xmin, ymax, xmax] 
-}
-```
+Set to `true` only if your tunnel provider requires the custom `bypass-tunnel-reminder` header.
 
-**Response:**
-```json
-{
-  "chairs": [{"box": [0.2, 0.3, 0.5, 0.4]}],
-  "frames": [{"box": [0.1, 0.8, 0.2, 0.9]}]
-}
-```
+## World Labs Integration
 
-## Troubleshooting & FAQ
+`src/worldlabs.ts` can generate a splat from a user-provided image URL.
 
-### 1. "404 Not Found" Errors
-If you see a 404 in the terminal, it usually means your API Key does not have access to the model string provided in the code.
-*   **Solution:** Run a model discovery script to see your authorized models. Use the exact model name from your authorized list (e.g., `models/gemini-3.5-flash`).
+The current UI path expects:
 
-### 2. "No JSON found" Errors
-This happens when Gemini returns empty results or chatty text.
-*   **Solution:** Check your `server.ts` regex logic. Ensure the prompt explicitly tells the model: *"No markdown, no backticks, return ONLY raw JSON."*
+- a World Labs API key
+- an image URL
+- a returned splat/world URL that `loadWorld(...)` can open
 
-### 3. Image Size Issues
-If images are coming through as "invalid format," ensure your `express.json` limit is set to at least `20mb`. Base64 snapshots are large.
+If you do not use World Labs generation, you can still run the viewer with the bundled assets in `public/`.
 
-## Current Configuration
-*   **Model:** `models/gemini-3.5-flash`.
-*   **Classes Detected:** Chairs, Frames.
+## Annotation Pipeline
 
-***
+The current annotation path is implemented in `src/script.ts`:
 
+1. Toggle the annotation tool in the toolbar.
+2. Click on the scene.
+3. Capture the click position and a snapshot.
+4. Send the snapshot plus click coordinates to the annotation endpoint.
+5. Sample points inside the returned 2D box.
+6. Lift valid samples into 3D.
+7. Cluster the lifted points with DBSCAN.
+8. Measure the dominant cluster with `THREE.Box3`.
+
+This means the displayed dimensions are derived from the surviving 3D sample cluster, not directly from the original 2D box.
+
+## Project Structure
+
+- `src/main.ts` - app bootstrap and landing UI
+- `src/script.ts` - scene setup, annotation flow, and measurement rendering
+- `src/GeometricContextManager/GeometricContextManager.ts` - clustering and measurement logic
+- `src/worldlabs.ts` - optional world generation client
+- `src/style.css` - UI styling
+- `public/` - bundled scene assets
+
+## Notes
+
+- The repo currently contains the frontend implementation only.
+- The annotation endpoint is expected to exist separately at `/api/annotate` or at the URL configured in `VITE_API_BASE_URL`.
+- The codebase is currently optimized around browser-side rendering and measurement, not a server-rendered flow.
