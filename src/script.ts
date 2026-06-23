@@ -5,20 +5,23 @@ import {
   SplatMesh,
   dyno,
 } from "@sparkjsdev/spark";
-import { setupSplatModifier } from "./utils/utils";
 import {
   getMobileInput,
   getMobileLook,
   initMobileControls,
   isMobileDevice,
 } from "./utils/mobileJoystick";
+import GeometricContextManager from "./GeometricContextManager/GeometricContextManager";
 // import { OrbitControls } from "three/examples/jsm/Addons.js";
 
 const API_BASE_URL =
-  (import.meta.env.VITE_API_BASE_URL as string | undefined)?.replace(/\/+$/, "") ||
-  "/api";
+  (import.meta.env.VITE_API_BASE_URL as string | undefined)?.replace(
+    /\/+$/,
+    "",
+  ) || "/api";
 const BYPASS_TUNNEL_REMINDER =
-  (import.meta.env.VITE_BYPASS_TUNNEL_REMINDER as string | undefined) === "true";
+  (import.meta.env.VITE_BYPASS_TUNNEL_REMINDER as string | undefined) ===
+  "true";
 
 function buildAnnotateEndpoint(baseUrl: string): string {
   const normalized = baseUrl.replace(/\/+$/, "");
@@ -33,6 +36,17 @@ function buildAnnotateEndpoint(baseUrl: string): string {
     return `${normalized}/api/annotate`;
   }
   return `${normalized}/annotate`;
+}
+
+interface AnnotationDetection {
+  label: string;
+  box: [number, number, number, number];
+}
+
+interface DimensionSet {
+  width: number;
+  height: number;
+  depth: number;
 }
 
 export class SplatViewer {
@@ -52,6 +66,10 @@ export class SplatViewer {
   private selectionBox: HTMLElement | null = null;
   private startPoint: { x: number; y: number } | null = null;
   private isSelecting = false;
+  private annotationLoadingEl: HTMLElement | null = null;
+  private annotationToolButton: HTMLButtonElement | null = null;
+  private readonly geometricContext = new GeometricContextManager();
+  private activeBoxHelper: THREE.Box3Helper | null = null;
 
   constructor() {
     this.scene = new THREE.Scene();
@@ -67,7 +85,11 @@ export class SplatViewer {
     this.cameraRig.rotateY(Math.PI);
     this.scene.add(this.cameraRig);
 
-    this.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, preserveDrawingBuffer: true });
+    this.renderer = new THREE.WebGLRenderer({
+      antialias: true,
+      alpha: true,
+      preserveDrawingBuffer: true,
+    });
     this.renderer.setSize(window.innerWidth, window.innerHeight);
     this.renderer.setPixelRatio(window.devicePixelRatio);
     document.body.appendChild(this.renderer.domElement);
@@ -78,8 +100,26 @@ export class SplatViewer {
     this.setMobileControls();
     this.setupEventListeners();
     this.setupAnnotationUI();
-    this.setupSelectionBox();
+    // this.setupSelectionBox();
+    this.setupClickInteraction();
+    this.setupLoadingUI();
     this.startAnimationLoop();
+  }
+
+  private setupLoadingUI() {
+    const loadingEl = document.createElement("div");
+    loadingEl.className = "annotation-loading hidden";
+    loadingEl.innerHTML = `
+      <div class="annotation-loading__spinner"></div>
+      <span>Fetching annotation...</span>
+    `;
+    document.body.appendChild(loadingEl);
+    this.annotationLoadingEl = loadingEl;
+  }
+
+  private setAnnotationLoading(isLoading: boolean) {
+    if (!this.annotationLoadingEl) return;
+    this.annotationLoadingEl.classList.toggle("hidden", !isLoading);
   }
 
   private setupEventListeners() {
@@ -96,6 +136,7 @@ export class SplatViewer {
     let lastTime = performance.now();
     this.renderer.setAnimationLoop((time) => {
       this.controls.update(this.cameraRig);
+      this.camera.updateMatrixWorld();
       // this.lockCameraHeightToGround();
       const MOVE_SPEED = 2.0;
       const deltaTime = (time - lastTime) / 1000;
@@ -113,114 +154,40 @@ export class SplatViewer {
     });
   }
 
-  private setupSelectionBox() {
-    this.renderer.domElement.addEventListener("mousedown", (e) => {
+  private setupClickInteraction() {
+    this.renderer.domElement.addEventListener("click", (e) => {
+      // Only trigger if a specific tool is active (optional)
       if (!this.isSelecting) return;
 
-      // Disable Spark camera input while selecting
-      this.controls.fpsMovement.enable = false;
-      this.controls.pointerControls.enable = false;
+      const rect = this.renderer.domElement.getBoundingClientRect();
+      const x = (e.clientX - rect.left) / rect.width;
+      const y = (e.clientY - rect.top) / rect.height;
+      const clickWorldPos = this.getAnnotationPosition(x, y);
 
-      this.startPoint = { x: e.clientX, y: e.clientY };
+      console.log(`User clicked at: x=${x.toFixed(2)}, y=${y.toFixed(2)}`);
 
-      this.selectionBox = document.createElement("div");
-      this.selectionBox.style.position = "absolute";
-      this.selectionBox.style.border = "2px dashed #00ff00";
-      this.selectionBox.style.backgroundColor = "rgba(0, 255, 0, 0.1)";
-      this.selectionBox.style.zIndex = "2000";
-      document.body.appendChild(this.selectionBox);
-    });
-
-    this.renderer.domElement.addEventListener("mousemove", (e) => {
-      if (!this.isSelecting || !this.startPoint || !this.selectionBox) return;
-
-      const width = e.clientX - this.startPoint.x;
-      const height = e.clientY - this.startPoint.y;
-
-      this.selectionBox.style.left = `${Math.min(e.clientX, this.startPoint.x)}px`;
-      this.selectionBox.style.top = `${Math.min(e.clientY, this.startPoint.y)}px`;
-      this.selectionBox.style.width = `${Math.abs(width)}px`;
-      this.selectionBox.style.height = `${Math.abs(height)}px`;
-    });
-
-    this.renderer.domElement.addEventListener("mouseup", (e) => {
-      if (!this.isSelecting || !this.startPoint || !this.selectionBox) return;
-
-      this.controls.fpsMovement.enable = true;
-      this.controls.pointerControls.enable = true; // Re-enable movement
-
-      const rect = this.selectionBox.getBoundingClientRect();
-      const canvasRect = this.renderer.domElement.getBoundingClientRect();
-
-      const box = [
-        (rect.top - canvasRect.top) / canvasRect.height,
-        (rect.left - canvasRect.left) / canvasRect.width,
-        (rect.bottom - canvasRect.top) / canvasRect.height,
-        (rect.right - canvasRect.left) / canvasRect.width,
-      ];
-
-      this.selectionBox.remove();
-      this.selectionBox = null;
-      this.startPoint = null;
-
-      // Optionally auto-disable tool after selection
-      this.isSelecting = false;
-      document
-        .getElementById("annotationToolButton")
-        ?.classList.remove("active");
-
-      this.requestAnnotationFromGemini(box);
+      // Trigger the new coordinate-based request
+      this.requestAnnotationFromGemini(x, y, clickWorldPos);
     });
   }
-  // private setupAnnotationUI() {
-  //     // Button toggle
-  //     const btn = document.getElementById('annotationToolButton');
-  //     if (btn) {
-  //         btn.addEventListener('click', () => {
-  //             btn.classList.toggle('active');
-  //         });
-  //     }
-  //     // if (btn) {
-  //     //     btn.addEventListener("click", async () => {
-  //     //     // statusText.innerText = "Asking Gemini for annotation...";
-  //     //     // btn.disabled = true;
-  //     //     try {
-  //     //         await this.requestAnnotationFromGemini();
-  //     //         // statusText.innerText = "Annotation added";
-  //     //     } catch (err: any) {
-  //     //         console.error(err);
-  //     //         // statusText.innerText = `Gemini error: ${
-  //     //         // err?.message ?? "unknown error"
-  //     //         // }`;
-  //     //     }
-  //     //     });
-  //     // }
-
-  //     // Canvas click for placing annotations when active
-  //     this.renderer.domElement.addEventListener('click', (ev) => {
-  //         const btnActive = btn?.classList.contains('active');
-  //         if (!btnActive) return;
-
-  //         const rect = this.renderer.domElement.getBoundingClientRect();
-  //         const x = (ev.clientX - rect.left) / rect.width;
-  //         const y = (ev.clientY - rect.top) / rect.height;
-  //         this.requestAnnotationFromGemini(x, y);
-  //         // const pos = this.getAnnotationPosition(x, y);
-  //         // if (pos) {
-  //         //     const label = prompt('Annotation label:', 'Object');
-  //         //     if (label) this.createAnnotationElement(pos, label);
-  //         // }
-  //     });
-  // }
   private setupAnnotationUI() {
     const btn = document.getElementById("annotationToolButton");
     if (btn) {
+      this.annotationToolButton = btn as HTMLButtonElement;
       btn.addEventListener("click", () => {
+        if ((btn as HTMLButtonElement).disabled) return;
         btn.classList.toggle("active");
         // FIX: Toggle the state
         this.isSelecting = btn.classList.contains("active");
       });
     }
+  }
+
+  private disableAnnotationToolButton() {
+    if (!this.annotationToolButton) return;
+    this.annotationToolButton.disabled = true;
+    this.annotationToolButton.classList.toggle("disabled", true);
+    this.isSelecting = false;
   }
   private updateAnnotationLabels() {
     this.annotations.forEach((ann) => {
@@ -346,76 +313,319 @@ export class SplatViewer {
     return null;
   }
   // Create a simple UI helper function
-  private createAnnotationElement(position: THREE.Vector3, label: string) {
-    const div = document.createElement("div");
-    div.className = "annotation-label";
-    div.innerText = label;
-    div.style.position = "absolute";
-    div.style.zIndex = "1000"; // Ensure it's on top of canvas
-    div.style.pointerEvents = "none"; // So clicks pass through
-    div.style.backgroundColor = "rgba(0,0,0,0.6)";
-    div.style.color = "white";
-    div.style.padding = "4px 8px";
-    div.style.borderRadius = "4px";
-    document.body.appendChild(div);
+  // private createAnnotationElement(position: THREE.Vector3, label: string) {
+  //   const div = document.createElement("div");
+  //   div.className = "annotation-label";
+  //   div.innerText = label;
+  //   div.style.position = "absolute";
+  //   div.style.zIndex = "1000"; // Ensure it's on top of canvas
+  //   div.style.pointerEvents = "none"; // So clicks pass through
+  //   div.style.backgroundColor = "rgba(0,0,0,0.6)";
+  //   div.style.color = "white";
+  //   div.style.padding = "4px 8px";
+  //   div.style.borderRadius = "4px";
+  //   document.body.appendChild(div);
 
-    this.annotations.push({ element: div, position });
+  //   this.annotations.push({ element: div, position });
+  // }
+  private getDepthKernel(x: number, y: number): number {
+    const gl = this.renderer.getContext();
+    const kernelSize = 2; // 5x5 grid
+    let minDepth = 1.0;
+    const pixelBuffer = new Float32Array(1);
+    const canvasHeight = this.renderer.domElement.height;
+
+    for (let i = -kernelSize; i <= kernelSize; i++) {
+      for (let j = -kernelSize; j <= kernelSize; j++) {
+        const px = Math.max(
+          0,
+          Math.min(this.renderer.domElement.width - 1, x + i),
+        );
+        const py = Math.max(
+          0,
+          Math.min(this.renderer.domElement.height - 1, y + j),
+        );
+
+        // WebGL coordinate flip: (0,0) is bottom-left in GL, top-left in Browser
+        const glY = canvasHeight - py;
+
+        gl.readPixels(px, glY, 1, 1, gl.DEPTH_COMPONENT, gl.FLOAT, pixelBuffer);
+
+        if (pixelBuffer[0] < minDepth && pixelBuffer[0] > 0) {
+          minDepth = pixelBuffer[0];
+        }
+      }
+    }
+    return minDepth;
+  }
+  private createAnnotationElement(
+    position: THREE.Vector3,
+    label: string,
+    dimensions?: DimensionSet,
+  ) {
+    const container = document.createElement("div");
+    container.className = "annotation-container";
+
+    // Create the "Pin" (the dot)
+    const pin = document.createElement("div");
+    pin.className = "annotation-pin";
+
+    // Create the "Card" (the info)
+    const card = document.createElement("div");
+    card.className = "annotation-card";
+    const title = document.createElement("h3");
+    title.textContent = label;
+    if (dimensions) {
+      const dimensionsLine = document.createElement("h3");
+      dimensionsLine.textContent = `${this.formatMeters(dimensions.width)} x ${this.formatMeters(dimensions.height)} x ${this.formatMeters(dimensions.depth)}`;
+      card.appendChild(dimensionsLine);
+    }
+    const closeBtn = document.createElement("button");
+    closeBtn.className = "close-btn";
+    closeBtn.textContent = "Close";
+    card.appendChild(title);
+    // card.appendChild(closeBtn);
+    card.style.display = "none"; // Hidden by default
+
+    // Interaction: Toggle card on pin click
+    pin.onclick = (e) => {
+      e.stopPropagation();
+      card.style.display = card.style.display === "none" ? "block" : "none";
+    };
+
+    closeBtn.addEventListener("click", () => {
+      card.style.display = "none";
+    });
+
+    container.appendChild(pin);
+    container.appendChild(card);
+    document.body.appendChild(container);
+
+    this.annotations.push({ element: container, position });
   }
 
-  private annotateDetectedObject(box: number[], label: string) {
-    const [ymin, xmin, ymax, xmax] = box;
+  private formatMeters(value: number): string {
+    return `${value.toFixed(2)}m`;
+  }
+
+  private sanitizeDetectionBox(
+    box: AnnotationDetection["box"],
+  ): AnnotationDetection["box"] | null {
+    if (!Array.isArray(box) || box.length !== 4) return null;
+    const clamped = box.map((value) =>
+      Number.isFinite(value) ? Math.min(1, Math.max(0, value)) : 0,
+    ) as AnnotationDetection["box"];
+    const [xmin, ymin, xmax, ymax] = clamped;
+    const width = xmax - xmin;
+    const height = ymax - ymin;
+    if (width < 0.02 || height < 0.02) {
+      return null;
+    }
+    return clamped;
+  }
+
+  private samplePointsFromBox(
+    box: AnnotationDetection["box"],
+    // gridSize = 10,
+  ): THREE.Vector3[] {
+    const [xmin, ymin, xmax, ymax] = box;
+    const points: THREE.Vector3[] = [];
+    // Adaptive sampling: scale grid resolution based on the 2D bounding box area
+    const width = xmax - xmin;
+    const height = ymax - ymin;
+    const area = width * height;
+
+    const minGridSize = 6;
+    const maxGridSize = 25;
+    const gridSize = Math.max(
+      minGridSize,
+      Math.min(
+        maxGridSize,
+        Math.round(minGridSize + (maxGridSize - minGridSize) * Math.sqrt(area)),
+      ),
+    );
+
+    console.log(
+      `[Adaptive Sampling] Box Area: ${area.toFixed(4)}, Selected Grid Size: ${gridSize}x${gridSize} (${gridSize * gridSize} rays)`,
+    );
+    for (let row = 0; row < gridSize; row++) {
+      for (let col = 0; col < gridSize; col++) {
+        const u = (col + 0.5) / gridSize;
+        const v = (row + 0.5) / gridSize;
+        const sampleX = xmin + u * (xmax - xmin);
+        const sampleY = ymin + v * (ymax - ymin);
+        const worldPos = this.getAnnotationPosition(sampleX, sampleY);
+        if (worldPos) points.push(worldPos);
+      }
+    }
+
+    return points;
+  }
+
+  private renderMeasurementBox(points: THREE.Vector3[]) {
+    if (this.activeBoxHelper) {
+      this.scene.remove(this.activeBoxHelper);
+      this.activeBoxHelper = null;
+    }
+
+    if (points.length === 0) return;
+
+    const box = new THREE.Box3().setFromPoints(points);
+    const helper = new THREE.Box3Helper(box, 0x76a8ff);
+    this.scene.add(helper);
+    this.activeBoxHelper = helper;
+  }
+
+  private annotateFromDetection(
+    detection: AnnotationDetection,
+    clickWorldPosAtClick: THREE.Vector3 | null,
+  ) {
+    const sanitizedBox = this.sanitizeDetectionBox(detection.box);
+    if (!sanitizedBox) {
+      console.warn(
+        "Discarding invalid or tiny Gemini bounding box.",
+        detection.box,
+      );
+      return;
+    }
+
+    const sampledPoints = this.samplePointsFromBox(sanitizedBox);
+    const measured = this.geometricContext.registerAndMeasureObject(
+      detection.label,
+      sampledPoints,
+      { eps: 0.3, minPts: 10 },
+    );
+
+    if (measured) {
+      this.renderMeasurementBox(measured.points);
+      this.createAnnotationElement(
+        measured.centroid.clone(),
+        detection.label,
+        measured.dimensions,
+      );
+      return;
+    }
+
+    if (clickWorldPosAtClick) {
+      this.createAnnotationElement(
+        clickWorldPosAtClick.clone(),
+        detection.label,
+      );
+      return;
+    }
+
+    this.annotateDetectedObject(sanitizedBox, detection.label);
+  }
+
+  private annotateDetectedObject(
+    box: AnnotationDetection["box"],
+    label: string,
+  ) {
+    const [xmin, ymin, xmax, ymax] = box;
     const centerX = (xmin + xmax) / 2;
     const centerY = (ymin + ymax) / 2;
 
     const worldPos = this.getAnnotationPosition(centerX, centerY);
     if (worldPos) {
-        this.createAnnotationElement(worldPos, label);
+      this.createAnnotationElement(worldPos, label);
     } else {
-        console.warn(`Lifting failed for ${label}`);
+      console.warn(`Lifting failed for ${label}`);
     }
-}
-private async captureSnapshot(): Promise<string> {
+  }
+
+  private async captureSnapshot(): Promise<string> {
     // 1. Force a render to ensure scene is up to date
     this.renderer.render(this.scene, this.camera);
-    
+
     // 2. Wait for GPU buffer sync
-    await new Promise(resolve => requestAnimationFrame(resolve));
-    
+    await new Promise((resolve) => requestAnimationFrame(resolve));
+
     // 3. Optional: Force GPU finish if necessary (very safe, prevents black screens)
-    this.renderer.getContext().finish(); 
-    
+    this.renderer.getContext().finish();
+
     return this.renderer.domElement.toDataURL("image/jpeg", 0.7);
-}
-public async requestAnnotationFromGemini(box: number[]) {
+  }
+  // public async requestAnnotationFromGemini(box: number[]) {
+  //     try {
+  //         // const dataUrl = this.renderer.domElement.toDataURL("image/jpeg", 0.7);
+  //         const dataUrl = await this.captureSnapshot();
+  //         const headers: Record<string, string> = { "Content-Type": "application/json" };
+
+  //         if (BYPASS_TUNNEL_REMINDER) {
+  //           headers["bypass-tunnel-reminder"] = "true";
+  //         }
+
+  //         const endpoint = buildAnnotateEndpoint(API_BASE_URL);
+
+  //         const response = await fetch(endpoint, {
+  //             method: "POST",
+  //             headers,
+  //             body: JSON.stringify({ image: dataUrl, userBox: box }),
+  //         });
+
+  //         const data = await response.json();
+
+  //         if (data.objects && Array.isArray(data.objects)) {
+  //             data.objects.forEach((item: any) => {
+  //                 // item.label is now whatever the AI decided it was!
+  //                 console.log(`Annotating detected object: ${item.label} at box ${item.box}`);
+  //                 const label = item.label === "objects" ? "Detected Item" : item.label;
+  //                 const description = item.description === "objects" ? "Detected Item" : item.description;
+  //                 this.annotateDetectedObject(item.box, label, description);
+  //             });
+  //         }
+  //     } catch (err) {
+  //         console.error("Annotation Error:", err);
+  //     }
+  //   }
+  public async requestAnnotationFromGemini(
+    clickX: number,
+    clickY: number,
+    clickWorldPosAtClick: THREE.Vector3 | null,
+  ) {
     try {
-        // const dataUrl = this.renderer.domElement.toDataURL("image/jpeg", 0.7);
-        const dataUrl = await this.captureSnapshot();
-        const headers: Record<string, string> = { "Content-Type": "application/json" };
+      this.setAnnotationLoading(true);
+      const dataUrl = await this.captureSnapshot();
+      const headers: Record<string, string> = {
+        "Content-Type": "application/json",
+      };
+      if (BYPASS_TUNNEL_REMINDER) headers["bypass-tunnel-reminder"] = "true";
 
-        if (BYPASS_TUNNEL_REMINDER) {
-          headers["bypass-tunnel-reminder"] = "true";
-        }
+      const response = await fetch(buildAnnotateEndpoint(API_BASE_URL), {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          image: dataUrl,
+          clickX: clickX,
+          clickY: clickY,
+        }),
+      });
 
-        const endpoint = buildAnnotateEndpoint(API_BASE_URL);
+      if (!response.ok) throw new Error("Server error");
+      const data = await response.json();
+      this.disableAnnotationToolButton();
+      const detection: AnnotationDetection | null =
+        data && typeof data.label === "string" && Array.isArray(data.box)
+          ? data
+          : Array.isArray(data)
+            ? (data[0] ?? null)
+            : Array.isArray(data?.objects)
+              ? (data.objects[0] ?? null)
+              : null;
 
-        const response = await fetch(endpoint, {
-            method: "POST",
-            headers,
-            body: JSON.stringify({ image: dataUrl, userBox: box }),
-        });
+      if (!detection?.label || !Array.isArray(detection.box)) {
+        console.warn(
+          "Expected single detection payload with label and box.",
+          data,
+        );
+        return;
+      }
 
-        const data = await response.json();
-        
-        if (data.objects && Array.isArray(data.objects)) {
-            data.objects.forEach((item: any) => {
-                // item.label is now whatever the AI decided it was!
-                console.log(`Annotating detected object: ${item.label} at box ${item.box}`);
-                const label = item.label === "objects" ? "Detected Item" : item.label;
-                this.annotateDetectedObject(item.box, label);
-            });
-        }
+      this.annotateFromDetection(detection, clickWorldPosAtClick);
     } catch (err) {
-        console.error("Annotation Error:", err);
+      console.error("Museum Mode Error:", err);
+    } finally {
+      this.setAnnotationLoading(false);
     }
   }
 }
