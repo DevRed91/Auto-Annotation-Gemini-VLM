@@ -454,8 +454,26 @@ export class SplatViewer {
         const v = (row + 0.5) / gridSize;
         const sampleX = xmin + u * (xmax - xmin);
         const sampleY = ymin + v * (ymax - ymin);
-        const worldPos = this.getAnnotationPosition(sampleX, sampleY);
-        if (worldPos) points.push(worldPos);
+        const worldPosRay = this.getAnnotationPosition(sampleX, sampleY);
+
+        // Depth Kernel Integration (Policy: Depth valid > Raycast > Drop)
+        const px = sampleX * this.renderer.domElement.width;
+        const py = sampleY * this.renderer.domElement.height;
+        const depth = this.getDepthKernel(px, py);
+
+        let finalPos: THREE.Vector3 | null = null;
+
+        // 1. Depth valid
+        if (depth < 1.0 && depth > 0) {
+          const ndcX = sampleX * 2 - 1;
+          const ndcY = -(sampleY * 2 - 1);
+          finalPos = new THREE.Vector3(ndcX, ndcY, depth * 2 - 1).unproject(this.camera);
+        } else if (worldPosRay) {
+          // 2. Depth invalid but raycast exists
+          finalPos = worldPosRay;
+        }
+
+        if (finalPos) points.push(finalPos);
       }
     }
 
