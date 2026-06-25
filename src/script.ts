@@ -12,6 +12,7 @@ import {
   isMobileDevice,
 } from "./utils/mobileJoystick";
 import GeometricContextManager from "./GeometricContextManager/GeometricContextManager";
+import type { CandidatePoint } from "./compute/types";
 // import { OrbitControls } from "three/examples/jsm/Addons.js";
 
 const API_BASE_URL =
@@ -48,6 +49,14 @@ interface DimensionSet {
   height: number;
   depth: number;
 }
+
+const CandidateFlags = {
+  DepthValid: 1 << 0,
+  RaycastValid: 1 << 1,
+  UsedDepthPosition: 1 << 2,
+  UsedRaycastPosition: 1 << 3,
+  DepthResidualValid: 1 << 4,
+} as const;
 
 export class SplatViewer {
   private scene: THREE.Scene;
@@ -424,12 +433,12 @@ export class SplatViewer {
     return clamped;
   }
 
-  private samplePointsFromBox(
+  private sampleCandidatesFromBox(
     box: AnnotationDetection["box"],
     // gridSize = 10,
-  ): THREE.Vector3[] {
+  ): CandidatePoint[] {
     const [xmin, ymin, xmax, ymax] = box;
-    const points: THREE.Vector3[] = [];
+    const candidates: CandidatePoint[] = [];
     // Adaptive sampling: scale grid resolution based on the 2D bounding box area
     const width = xmax - xmin;
     const height = ymax - ymin;
@@ -461,23 +470,69 @@ export class SplatViewer {
         const py = sampleY * this.renderer.domElement.height;
         const depth = this.getDepthKernel(px, py);
 
+        const hasValidDepth = depth < 1.0 && depth > 0;
+        const depthNdc = hasValidDepth ? depth * 2 - 1 : Number.NaN;
+        const depthPos = hasValidDepth
+          ? new THREE.Vector3(sampleX * 2 - 1, -(sampleY * 2 - 1), depthNdc).unproject(
+              this.camera,
+            )
+          : null;
         let finalPos: THREE.Vector3 | null = null;
+        let flags = 0;
 
         // 1. Depth valid
-        if (depth < 1.0 && depth > 0) {
-          const ndcX = sampleX * 2 - 1;
-          const ndcY = -(sampleY * 2 - 1);
-          finalPos = new THREE.Vector3(ndcX, ndcY, depth * 2 - 1).unproject(this.camera);
+        if (hasValidDepth && depthPos) {
+          finalPos = depthPos;
+          flags |= CandidateFlags.DepthValid | CandidateFlags.UsedDepthPosition;
         } else if (worldPosRay) {
           // 2. Depth invalid but raycast exists
           finalPos = worldPosRay;
+          flags |= CandidateFlags.UsedRaycastPosition;
         }
 
-        if (finalPos) points.push(finalPos);
+        if (worldPosRay) flags |= CandidateFlags.RaycastValid;
+
+        const rayDistance = worldPosRay
+          ? this.camera.position.distanceTo(worldPosRay)
+          : Number.NaN;
+        const depthResidual =
+          depthPos && worldPosRay
+            ? depthPos.distanceTo(worldPosRay)
+            : Number.NaN;
+        if (Number.isFinite(depthResidual)) {
+          flags |= CandidateFlags.DepthResidualValid;
+        }
+
+        if (finalPos) {
+          candidates.push({
+            position: [finalPos.x, finalPos.y, finalPos.z],
+            depthNdc,
+            sampleUv: [sampleX, sampleY],
+            rayDistance,
+            depthResidual,
+            flags,
+            confidence: 1.0,
+          });
+        }
       }
     }
 
-    return points;
+    return candidates;
+  }
+
+  private samplePointsFromBox(
+    box: AnnotationDetection["box"],
+    // gridSize = 10,
+  ): THREE.Vector3[] {
+    const candidates = this.sampleCandidatesFromBox(box);
+    return candidates.map(
+      (candidate) =>
+        new THREE.Vector3(
+          candidate.position[0],
+          candidate.position[1],
+          candidate.position[2],
+        ),
+    );
   }
 
   private renderMeasurementBox(points: THREE.Vector3[]) {
@@ -657,6 +712,6 @@ export async function loadWorld(url: string) {
 }
 
 // Initial load
-const initialURL = "/Apartment.sog";
-// const initialURL = "/BiltmoreGaussianSplat.sog";
+// const initialURL = "/Apartment.sog";
+const initialURL = "/BiltmoreGaussianSplat.ply";
 loadWorld(initialURL);
