@@ -277,6 +277,8 @@ canvas {
   top: 12px;
   left: 12px;
   z-index: 10;
+  display: flex;
+  gap: 8px;
 }
 
 .toolbar-btn {
@@ -327,4 +329,93 @@ canvas {
   border: 2px solid rgba(255, 255, 255, 0.3);
   border-top-color: #ffffff;
   animation: rotation 0.8s linear infinite;
+}
+
+/* Measure line tool */
+.measure-marker {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+  z-index: 1000;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+
+.measure-marker.hidden {
+  display: none !important;
+}
+
+.measure-pin {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #3fa9ff;
+  border: 2px solid #eaf6ff;
+  box-shadow:
+    0 0 6px 2px rgba(63, 169, 255, 0.9),
+    0 0 16px 6px rgba(63, 169, 255, 0.5);
+}
+
+.measure-caption {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: #eaf6ff;
+  text-shadow: 0 0 6px rgba(63, 169, 255, 0.9);
+}
+
+.measure-label {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  z-index: 1001;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: rgba(2, 6, 23, 0.9);
+  border: 1px solid rgba(63, 169, 255, 0.6);
+  box-shadow: 0 0 10px rgba(63, 169, 255, 0.5);
+  color: #eaf6ff;
+  font-size: 12px;
+  pointer-events: auto;
+}
+
+.measure-label.hidden {
+  display: none !important;
+}
+
+.measure-label__input {
+  background: transparent;
+  border: none;
+  outline: none;
+  color: #eaf6ff;
+  font-size: 12px;
+  width: 90px;
+}
+
+.measure-label__text {
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.measure-label__text.hidden,
+.measure-label__input.hidden {
+  display: none;
+}
+
+.measure-label__remove {
+  background: none;
+  border: none;
+  color: rgba(234, 246, 255, 0.6);
+  cursor: pointer;
+  font-size: 11px;
+  padding: 0;
+  line-height: 1;
+}
+
+.measure-label__remove:hover {
+  color: #eaf6ff;
 }

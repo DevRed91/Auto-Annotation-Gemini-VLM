@@ -13,6 +13,7 @@ import {
 } from "./utils/mobileJoystick";
 import GeometricContextManager from "./GeometricContextManager/GeometricContextManager";
 import type { CandidatePoint } from "./compute/types";
+import { MeasureLineTool, type ScreenProjection } from "./measure/MeasureLineTool";
 // import { OrbitControls } from "three/examples/jsm/Addons.js";
 
 const API_BASE_URL =
@@ -74,9 +75,12 @@ export class SplatViewer {
   private annotations: { element: HTMLElement; position: THREE.Vector3 }[] = [];
   private selectionBox: HTMLElement | null = null;
   private startPoint: { x: number; y: number } | null = null;
-  private isSelecting = false;
+  private activeTool: "none" | "annotate" | "measure" = "none";
+  private pointerDownPos: { x: number; y: number } | null = null;
   private annotationLoadingEl: HTMLElement | null = null;
   private annotationToolButton: HTMLButtonElement | null = null;
+  private measureToolButton: HTMLButtonElement | null = null;
+  private measureTool: MeasureLineTool | null = null;
   private readonly geometricContext = new GeometricContextManager();
   private activeBoxHelper: THREE.Box3Helper | null = null;
 
@@ -106,9 +110,20 @@ export class SplatViewer {
 
     this.spark = new SparkRenderer({ renderer: this.renderer });
     this.scene.add(this.spark);
+    this.measureTool = new MeasureLineTool({
+      scene: this.scene,
+      getPickPosition: (x, y) => this.getAnnotationPosition(x, y),
+      projectToScreen: (position) => this.projectToScreen(position),
+      onComplete: () => {
+        this.activeTool = "none";
+        this.measureToolButton?.classList.remove("active");
+      },
+    });
+
     this.setMobileControls();
     this.setupEventListeners();
     this.setupAnnotationUI();
+    this.setupMeasureUI();
     // this.setupSelectionBox();
     this.setupClickInteraction();
     this.setupLoadingUI();
@@ -139,6 +154,7 @@ export class SplatViewer {
     this.camera.aspect = window.innerWidth / window.innerHeight;
     this.camera.updateProjectionMatrix();
     this.renderer.setSize(window.innerWidth, window.innerHeight);
+    this.measureTool?.onResize(window.innerWidth, window.innerHeight);
   }
 
   private startAnimationLoop() {
@@ -159,23 +175,51 @@ export class SplatViewer {
 
       this.updateMobileControls(deltaTime, MOVE_SPEED);
       this.updateAnnotationLabels();
+      this.measureTool?.update(deltaTime);
       this.renderer.render(this.scene, this.camera);
     });
   }
 
   private setupClickInteraction() {
-    this.renderer.domElement.addEventListener("click", (e) => {
-      // Only trigger if a specific tool is active (optional)
-      if (!this.isSelecting) return;
+    const el = this.renderer.domElement;
 
-      const rect = this.renderer.domElement.getBoundingClientRect();
+    el.addEventListener("pointerdown", (e) => {
+      this.pointerDownPos = { x: e.clientX, y: e.clientY };
+    });
+
+    el.addEventListener("pointermove", (e) => {
+      if (this.activeTool !== "measure") return;
+      const rect = el.getBoundingClientRect();
       const x = (e.clientX - rect.left) / rect.width;
       const y = (e.clientY - rect.top) / rect.height;
+      this.measureTool?.handlePointerMove(x, y);
+    });
+
+    el.addEventListener("click", (e) => {
+      // SparkControls captures the pointer on orbit-drag but never
+      // suppresses the trailing click — ignore clicks that moved more
+      // than a few pixels so camera drags don't mis-fire either tool.
+      const downPos = this.pointerDownPos;
+      this.pointerDownPos = null;
+      if (downPos) {
+        const dx = e.clientX - downPos.x;
+        const dy = e.clientY - downPos.y;
+        if (Math.sqrt(dx * dx + dy * dy) > 5) return;
+      }
+
+      if (this.activeTool === "none") return;
+
+      const rect = el.getBoundingClientRect();
+      const x = (e.clientX - rect.left) / rect.width;
+      const y = (e.clientY - rect.top) / rect.height;
+
+      if (this.activeTool === "measure") {
+        this.measureTool?.handleClick(x, y);
+        return;
+      }
+
       const clickWorldPos = this.getAnnotationPosition(x, y);
-
       console.log(`User clicked at: x=${x.toFixed(2)}, y=${y.toFixed(2)}`);
-
-      // Trigger the new coordinate-based request
       this.requestAnnotationFromGemini(x, y, clickWorldPos);
     });
   }
@@ -185,35 +229,66 @@ export class SplatViewer {
       this.annotationToolButton = btn as HTMLButtonElement;
       btn.addEventListener("click", () => {
         if ((btn as HTMLButtonElement).disabled) return;
-        btn.classList.toggle("active");
-        // FIX: Toggle the state
-        this.isSelecting = btn.classList.contains("active");
+        const activating = !btn.classList.contains("active");
+        if (activating) {
+          this.measureToolButton?.classList.remove("active");
+          this.measureTool?.deactivate();
+          this.activeTool = "annotate";
+          btn.classList.add("active");
+        } else {
+          this.activeTool = "none";
+          btn.classList.remove("active");
+        }
       });
     }
+  }
+
+  private setupMeasureUI() {
+    const btn = document.getElementById("measureToolButton");
+    if (!btn) return;
+    this.measureToolButton = btn as HTMLButtonElement;
+    btn.addEventListener("click", () => {
+      if ((btn as HTMLButtonElement).disabled) return;
+      const activating = !btn.classList.contains("active");
+      if (activating) {
+        this.annotationToolButton?.classList.remove("active");
+        this.activeTool = "measure";
+        btn.classList.add("active");
+        this.measureTool?.activate();
+      } else {
+        this.activeTool = "none";
+        btn.classList.remove("active");
+        this.measureTool?.deactivate();
+      }
+    });
   }
 
   private disableAnnotationToolButton() {
     if (!this.annotationToolButton) return;
     this.annotationToolButton.disabled = true;
     this.annotationToolButton.classList.toggle("disabled", true);
-    this.isSelecting = false;
+    this.annotationToolButton.classList.remove("active");
+    if (this.activeTool === "annotate") this.activeTool = "none";
   }
+
+  private projectToScreen(position: THREE.Vector3): ScreenProjection {
+    const pos = position.clone().project(this.camera);
+    const visible = pos.z <= 1;
+    const x = (pos.x * 0.5 + 0.5) * window.innerWidth;
+    const y = (-pos.y * 0.5 + 0.5) * window.innerHeight;
+    return { x, y, visible };
+  }
+
   private updateAnnotationLabels() {
     this.annotations.forEach((ann) => {
       // Check if element exists
       if (!ann.element) return;
 
-      // Project 3D point to NDC
-      const pos = ann.position.clone().project(this.camera);
-
-      // Hide if behind camera (pos.z > 1) or out of frustum
-      if (pos.z > 1) {
+      const { x, y, visible } = this.projectToScreen(ann.position);
+      if (!visible) {
         ann.element.style.display = "none";
       } else {
         ann.element.style.display = "block";
-        // Convert NDC (-1 to 1) to screen pixels
-        const x = (pos.x * 0.5 + 0.5) * window.innerWidth;
-        const y = (-pos.y * 0.5 + 0.5) * window.innerHeight;
         ann.element.style.left = `${x}px`;
         ann.element.style.top = `${y}px`;
       }
