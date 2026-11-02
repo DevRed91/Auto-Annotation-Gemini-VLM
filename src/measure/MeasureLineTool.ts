@@ -17,17 +17,22 @@ export interface MeasureLineToolOptions {
   onComplete?: () => void;
 }
 
-type MeasureState = "idle" | "awaitingStart" | "awaitingEnd" | "complete";
+type MeasureState = "idle" | "awaitingStart" | "awaitingPoint" | "complete";
 
 interface Marker {
   container: HTMLElement;
 }
 
+interface SegmentLabel {
+  el: HTMLElement;
+  text: HTMLSpanElement;
+  input: HTMLInputElement;
+}
+
 /**
- * Local, non-Gemini interaction tool: click two points on the splat to drop
- * a glowing measurement line with START/END markers and a user-typed
- * distance label. `points` is kept as an array so a future polyline/route
- * mode can extend this without rework (see MEASURE_LINE_PLAN.md §4).
+ * Local, non-Gemini interaction tool: click through a sequence of points on
+ * the splat to drop a continuous glowing polyline with START/END markers, a
+ * per-segment distance label, and a total-route badge.
  */
 export class MeasureLineTool {
   private state: MeasureState = "idle";
@@ -35,9 +40,9 @@ export class MeasureLineTool {
   private readonly glowLine: GlowLine;
   private readonly startMarker: Marker;
   private readonly endMarker: Marker;
-  private readonly labelEl: HTMLElement;
-  private readonly labelText: HTMLSpanElement;
-  private readonly labelInput: HTMLInputElement;
+  private readonly segmentLabels: SegmentLabel[] = [];
+  private readonly totalLabel: HTMLElement;
+  private readonly totalLabelText: HTMLSpanElement;
   private time = 0;
 
   constructor(private readonly opts: MeasureLineToolOptions) {
@@ -47,18 +52,21 @@ export class MeasureLineTool {
     this.startMarker = this.createMarker("START");
     this.endMarker = this.createMarker("END");
 
-    const { labelEl, labelText, labelInput } = this.createLabel();
-    this.labelEl = labelEl;
-    this.labelText = labelText;
-    this.labelInput = labelInput;
+    const { totalLabel, totalLabelText } = this.createTotalBadge();
+    this.totalLabel = totalLabel;
+    this.totalLabelText = totalLabelText;
 
     document.body.appendChild(this.startMarker.container);
     document.body.appendChild(this.endMarker.container);
-    document.body.appendChild(this.labelEl);
+    document.body.appendChild(this.totalLabel);
+
+    document.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") this.finish();
+    });
   }
 
   get isArmed(): boolean {
-    return this.state === "awaitingStart" || this.state === "awaitingEnd";
+    return this.state === "awaitingStart" || this.state === "awaitingPoint";
   }
 
   activate(): void {
@@ -83,24 +91,33 @@ export class MeasureLineTool {
     if (this.state === "awaitingStart") {
       this.points = [worldPos.clone()];
       this.startMarker.container.classList.remove("hidden");
-      this.state = "awaitingEnd";
+      this.state = "awaitingPoint";
       return;
     }
 
-    // awaitingEnd
-    this.points[1] = worldPos.clone();
-    this.glowLine.setEndpoints(this.points[0], this.points[1]);
-    this.endMarker.container.classList.remove("hidden");
-    this.state = "complete";
-    this.showLabelForEditing();
-    this.opts.onComplete?.();
+    // Each subsequent click commits a segment ending at this exact point.
+    // Keep the tool armed so the next preview/segment starts here.
+    this.points.push(worldPos.clone());
+    this.glowLine.setPoints(this.points);
+    this.positionEndMarker();
+    this.addSegmentLabel();
   }
 
   handlePointerMove(normalizedX: number, normalizedY: number): void {
-    if (this.state !== "awaitingEnd" || this.points.length === 0) return;
+    if (this.state !== "awaitingPoint" || this.points.length === 0) return;
     const hoverPos = this.opts.getPickPosition(normalizedX, normalizedY);
     if (!hoverPos) return;
-    this.glowLine.setEndpoints(this.points[0], hoverPos);
+    this.glowLine.setPoints([...this.points, hoverPos]);
+  }
+
+  finish(): void {
+    if (this.state !== "awaitingPoint" || this.points.length < 2) return;
+    this.positionEndMarker();
+    this.state = "complete";
+    const last = this.segmentLabels[this.segmentLabels.length - 1];
+    if (last) this.showLabelForEditing(last);
+    this.updateTotalLabel();
+    this.opts.onComplete?.();
   }
 
   update(dt: number): void {
@@ -110,9 +127,18 @@ export class MeasureLineTool {
     if (this.points[0]) {
       this.positionMarker(this.startMarker, this.points[0]);
     }
-    if (this.points[1]) {
-      this.positionMarker(this.endMarker, this.points[1]);
-      this.positionLabel(this.glowLine.getMidpoint());
+    if (this.points.length > 1) {
+      const end = this.points[this.points.length - 1];
+      this.positionMarker(this.endMarker, end);
+      this.positionTotalLabel(end);
+    }
+
+    for (let i = 0; i < this.segmentLabels.length; i += 1) {
+      const mid = this.points[i]
+        .clone()
+        .add(this.points[i + 1])
+        .multiplyScalar(0.5);
+      this.positionLabel(this.segmentLabels[i].el, mid);
     }
   }
 
@@ -125,8 +151,26 @@ export class MeasureLineTool {
     this.glowLine.setVisible(false);
     this.startMarker.container.classList.add("hidden");
     this.endMarker.container.classList.add("hidden");
-    this.labelEl.classList.add("hidden");
+    for (const segment of this.segmentLabels) {
+      segment.el.remove();
+    }
+    this.segmentLabels.length = 0;
+    this.totalLabel.classList.add("hidden");
+    this.totalLabelText.textContent = "Total: —";
     this.state = "idle";
+  }
+
+  private addSegmentLabel(): void {
+    const segment = this.createSegmentLabel();
+    this.segmentLabels.push(segment);
+    document.body.appendChild(segment.el);
+  }
+
+  private positionEndMarker(): void {
+    const end = this.points[this.points.length - 1];
+    if (!end) return;
+    this.endMarker.container.classList.remove("hidden");
+    this.positionMarker(this.endMarker, end);
   }
 
   private positionMarker(marker: Marker, position: THREE.Vector3): void {
@@ -136,11 +180,24 @@ export class MeasureLineTool {
     marker.container.style.top = `${y}px`;
   }
 
-  private positionLabel(position: THREE.Vector3): void {
+  private positionLabel(el: HTMLElement, position: THREE.Vector3): void {
     const { x, y, visible } = this.opts.projectToScreen(position);
-    this.labelEl.classList.toggle("hidden", !visible);
-    this.labelEl.style.left = `${x}px`;
-    this.labelEl.style.top = `${y}px`;
+    el.classList.toggle("hidden", !visible);
+    el.style.left = `${x}px`;
+    el.style.top = `${y}px`;
+  }
+
+  // Offset so the total badge sits beside the end marker rather than on
+  // top of it (see the "Total Route" placement in the reference mock).
+  private positionTotalLabel(endPosition: THREE.Vector3): void {
+    if (this.state !== "complete" || this.segmentLabels.length < 2) {
+      this.totalLabel.classList.add("hidden");
+      return;
+    }
+    const { x, y, visible } = this.opts.projectToScreen(endPosition);
+    this.totalLabel.classList.toggle("hidden", !visible);
+    this.totalLabel.style.left = `${x + 60}px`;
+    this.totalLabel.style.top = `${y - 40}px`;
   }
 
   private createMarker(caption: string): Marker {
@@ -159,29 +216,33 @@ export class MeasureLineTool {
     return { container };
   }
 
-  private createLabel(): {
-    labelEl: HTMLElement;
-    labelText: HTMLSpanElement;
-    labelInput: HTMLInputElement;
-  } {
-    const labelEl = document.createElement("div");
-    labelEl.className = "measure-label hidden";
+  private createSegmentLabel(): SegmentLabel {
+    const el = document.createElement("div");
+    el.className = "measure-label";
 
-    const labelText = document.createElement("span");
-    labelText.className = "measure-label__text hidden";
-    labelText.addEventListener("click", (e) => {
+    const text = document.createElement("span");
+    text.className = "measure-label__text hidden";
+
+    const input = document.createElement("input");
+    input.type = "text";
+    input.className = "measure-label__input";
+    input.placeholder = "e.g. 300 m";
+
+    const segment: SegmentLabel = { el, text, input };
+
+    text.addEventListener("click", (e) => {
       e.stopPropagation();
-      this.openLabelForEditing();
+      this.openLabelForEditing(segment);
     });
-
-    const labelInput = document.createElement("input");
-    labelInput.type = "text";
-    labelInput.className = "measure-label__input";
-    labelInput.placeholder = "e.g. 300 m";
-    labelInput.addEventListener("click", (e) => e.stopPropagation());
-    labelInput.addEventListener("blur", () => this.commitLabelText());
-    labelInput.addEventListener("keydown", (e) => {
-      if (e.key === "Enter") labelInput.blur();
+    input.addEventListener("click", (e) => e.stopPropagation());
+    input.addEventListener("blur", () => this.commitLabelText(segment));
+    input.addEventListener("keydown", (e) => {
+      // Stop this from bubbling to the document-level Enter handler, which
+      // would otherwise end the whole polyline while a segment is mid-edit.
+      if (e.key === "Enter") {
+        e.stopPropagation();
+        input.blur();
+      }
     });
 
     const removeBtn = document.createElement("button");
@@ -193,33 +254,82 @@ export class MeasureLineTool {
       this.clear();
     });
 
-    labelEl.appendChild(labelText);
-    labelEl.appendChild(labelInput);
-    labelEl.appendChild(removeBtn);
+    el.appendChild(text);
+    el.appendChild(input);
+    el.appendChild(removeBtn);
 
-    return { labelEl, labelText, labelInput };
+    return segment;
   }
 
-  private showLabelForEditing(): void {
-    this.labelEl.classList.remove("hidden");
-    this.labelText.classList.add("hidden");
-    this.labelInput.classList.remove("hidden");
-    this.labelInput.value = "";
-    requestAnimationFrame(() => this.labelInput.focus());
+  private createTotalBadge(): {
+    totalLabel: HTMLElement;
+    totalLabelText: HTMLSpanElement;
+  } {
+    const totalLabel = document.createElement("div");
+    totalLabel.className = "measure-label measure-label--total hidden";
+
+    const totalLabelText = document.createElement("span");
+    totalLabelText.className = "measure-label__text";
+    totalLabelText.textContent = "Total: —";
+
+    const removeBtn = document.createElement("button");
+    removeBtn.type = "button";
+    removeBtn.className = "measure-label__remove";
+    removeBtn.textContent = "✕";
+    removeBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      this.clear();
+    });
+
+    totalLabel.appendChild(totalLabelText);
+    totalLabel.appendChild(removeBtn);
+
+    return { totalLabel, totalLabelText };
   }
 
-  private openLabelForEditing(): void {
-    this.labelInput.value = this.labelText.textContent ?? "";
-    this.labelText.classList.add("hidden");
-    this.labelInput.classList.remove("hidden");
-    requestAnimationFrame(() => this.labelInput.focus());
+  private showLabelForEditing(segment: SegmentLabel): void {
+    segment.text.classList.add("hidden");
+    segment.input.classList.remove("hidden");
+    segment.input.value = "";
+    requestAnimationFrame(() => segment.input.focus());
   }
 
-  private commitLabelText(): void {
-    const value = this.labelInput.value.trim();
-    this.labelText.textContent = value;
+  private openLabelForEditing(segment: SegmentLabel): void {
+    segment.input.value = segment.text.textContent ?? "";
+    segment.text.classList.add("hidden");
+    segment.input.classList.remove("hidden");
+    requestAnimationFrame(() => segment.input.focus());
+  }
+
+  private commitLabelText(segment: SegmentLabel): void {
+    const value = segment.input.value.trim();
+    segment.text.textContent = value;
     const hasValue = value.length > 0;
-    this.labelText.classList.toggle("hidden", !hasValue);
-    this.labelInput.classList.toggle("hidden", hasValue);
+    segment.text.classList.toggle("hidden", !hasValue);
+    segment.input.classList.toggle("hidden", hasValue);
+    this.updateTotalLabel();
+  }
+
+  // Sums the leading numeric value out of each segment's free-typed label
+  // (e.g. "300 m") since distances are user-entered, not scene-calibrated.
+  private updateTotalLabel(): void {
+    let sum = 0;
+    let unit = "";
+    let any = false;
+
+    for (const segment of this.segmentLabels) {
+      const match = segment.text.textContent
+        ?.trim()
+        .match(/^(-?\d+(?:\.\d+)?)\s*(.*)$/);
+      if (match) {
+        sum += parseFloat(match[1]);
+        if (!unit && match[2]) unit = match[2];
+        any = true;
+      }
+    }
+
+    this.totalLabelText.textContent = any
+      ? `Total: ${Number(sum.toFixed(2))}${unit ? ` ${unit}` : ""}`
+      : "Total: —";
   }
 }

@@ -18,8 +18,8 @@ const DEFAULTS: Required<GlowLineOptions> = {
   coreColor: 0xeaf6ff,
   glowColor: 0x3fa9ff,
   coreWidth: 0.12,
-  falloff: 3.0,
-  glowStrength: 1.4,
+  falloff: 4.5,
+  glowStrength: 0.6,
   opacity: 1.0,
 };
 
@@ -96,22 +96,23 @@ export class GlowLine {
   }
 
   setEndpoints(start: THREE.Vector3, end: THREE.Vector3): void {
-    this.start.copy(start);
-    this.end.copy(end);
-    this.geometry.setPositions([
-      start.x,
-      start.y,
-      start.z,
-      end.x,
-      end.y,
-      end.z,
-    ]);
-    this.object.computeLineDistances();
-    this.object.visible = true;
+    this.setPoints([start, end]);
   }
 
-  getMidpoint(target: THREE.Vector3 = new THREE.Vector3()): THREE.Vector3 {
-    return target.copy(this.start).add(this.end).multiplyScalar(0.5);
+  setPoints(points: readonly THREE.Vector3[]): void {
+    if (points.length < 2) {
+      this.object.visible = false;
+      return;
+    }
+
+    // LineGeometry chains consecutive points into one continuous polyline
+    // (it builds the start/end instance pairs internally), so clicked points
+    // can be passed straight through.
+    this.start.copy(points[0]);
+    this.end.copy(points[points.length - 1]);
+    this.geometry.setFromPoints(points as THREE.Vector3[]);
+    this.object.computeLineDistances();
+    this.object.visible = true;
   }
 
   setVisible(visible: boolean): void {

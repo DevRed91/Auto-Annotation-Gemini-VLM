@@ -387,6 +387,13 @@ canvas {
   display: none !important;
 }
 
+.measure-label--total {
+  padding: 6px 14px;
+  font-weight: 700;
+  border-radius: 10px;
+  white-space: nowrap;
+}
+
 .measure-label__input {
   background: transparent;
   border: none;
