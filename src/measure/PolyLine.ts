@@ -121,8 +121,13 @@ export class PolyLine {
     this.object.renderOrder = 999;
     this.object.frustumCulled = false;
     this.object.visible = false;
-    this.object.onBeforeRender = (_renderer, _scene, camera) =>
-      this.updatePixelDistances(camera);
+    this.object.onBeforeRender = (
+      _renderer: THREE.WebGLRenderer,
+      _scene?: THREE.Scene,
+      camera?: THREE.Camera,
+    ) => {
+      if (camera) this.updatePixelDistances(camera);
+    };
   }
 
   /**
