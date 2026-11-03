@@ -13,7 +13,7 @@ export interface PolyLineOptions {
 const DEFAULTS = {
   maxPoints: 256,
   linewidthPixels: 28,
-  color: 0x3fe0ff,
+  color: 0x1a73e8,
   opacity: 1,
 };
 
