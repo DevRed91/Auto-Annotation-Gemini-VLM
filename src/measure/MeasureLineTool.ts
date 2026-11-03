@@ -1,5 +1,13 @@
 import * as THREE from "three";
-import { GlowLine } from "./GlowLine";
+import { PolyLine } from "./PolyLine";
+
+export interface PathRenderer {
+  readonly object: THREE.Object3D;
+  setPoints(points: readonly THREE.Vector3[]): void;
+  setVisible(visible: boolean): void;
+  update(time: number): void;
+  onResize(width: number, height: number): void;
+}
 
 export interface ScreenProjection {
   x: number;
@@ -37,7 +45,8 @@ interface SegmentLabel {
 export class MeasureLineTool {
   private state: MeasureState = "idle";
   private points: THREE.Vector3[] = [];
-  private readonly glowLine: GlowLine;
+  private readonly glowLine: PathRenderer;
+  private readonly previewPoints: THREE.Vector3[] = [];
   private readonly startMarker: Marker;
   private readonly endMarker: Marker;
   private readonly segmentLabels: SegmentLabel[] = [];
@@ -46,7 +55,7 @@ export class MeasureLineTool {
   private time = 0;
 
   constructor(private readonly opts: MeasureLineToolOptions) {
-    this.glowLine = new GlowLine();
+    this.glowLine = new PolyLine();
     this.opts.scene.add(this.glowLine.object);
 
     this.startMarker = this.createMarker("START");
@@ -67,6 +76,10 @@ export class MeasureLineTool {
 
   get isArmed(): boolean {
     return this.state === "awaitingStart" || this.state === "awaitingPoint";
+  }
+
+  getPoints(): readonly THREE.Vector3[] {
+    return this.points;
   }
 
   activate(): void {
@@ -107,7 +120,12 @@ export class MeasureLineTool {
     if (this.state !== "awaitingPoint" || this.points.length === 0) return;
     const hoverPos = this.opts.getPickPosition(normalizedX, normalizedY);
     if (!hoverPos) return;
-    this.glowLine.setPoints([...this.points, hoverPos]);
+    this.previewPoints.length = this.points.length;
+    for (let i = 0; i < this.points.length; i += 1) {
+      this.previewPoints[i] = this.points[i];
+    }
+    this.previewPoints.push(hoverPos);
+    this.glowLine.setPoints(this.previewPoints);
   }
 
   finish(): void {
