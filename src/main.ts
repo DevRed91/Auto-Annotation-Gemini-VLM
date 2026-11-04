@@ -42,7 +42,7 @@ function renderMainUI() {
   //   </div>
   // `
 
-  const controls = document.getElementById("controls")!;
+  // const controls = document.getElementById("controls")!;
   const generateBtn = document.getElementById(
     "generate-btn",
   ) as HTMLButtonElement;

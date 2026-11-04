@@ -1,6 +1,6 @@
 # Flaw Diagnosis & Rectification — Implementation Plan
 
-**Status:** Planning only — nothing implemented yet.
+**Status:** Partial implementation. Store, diagnosis, regions, rectification, and export foundations exist. One end-to-end path is wired in the viewer: diagnose → Select region → single-view lift (`lift.ts`, snapshot camera only, no probe views or votes) → point-overlay highlight (`preview.ts`) → Apply with live Spark update → Undo/Redo → Export PLY. Not yet done: multi-view probe voting, SH edits, densification, browser/backend validation, and fixed-camera before/after quality checks.
 **Reference:** `gemini-code-1793774909984.md` (GaussFlaw / GeoCritic paper context, flaw→operation table, default parameters).
 
 **Goal:** extend the existing click → Gemini → lift flow in `src/script.ts`. Gemini detects 3DGS **flaws** (8 GaussFlaw classes) instead of objects. Lifting selects **individual Gaussians** instead of a bounding box. The viewer then applies targeted edits (opacity, scale, SH, prune) and exports an edited PLY.
@@ -54,7 +54,8 @@ src/flaw/
 ### M1 — Diagnosis API
 - **Backend (separate repo):** a new `POST /api/diagnose`.
   - Request: `{ image: dataURL, click?: {x, y} }`
-  - Response: `[{ class: FlawClass, box: [xmin,ymin,xmax,ymax], mask: base64 PNG, confidence: number }]`
+  - Response: `[{ class: FlawClass, box: [ymin,xmin,ymax,xmax], mask: base64 PNG, confidence: number, maskSpace?: "box" | "full-frame" }]`
+  - Boxes use Gemini image coordinates on a 0?1000 scale. Masks are box-local by default and are drawn inside that box. Backends that return full-frame masks must set `maskSpace: "full-frame"`. The separate backend must adopt this contract before integration. Invalid classes/boxes are discarded; invalid confidence defaults to 0.
   - The prompt includes the 8 class definitions from the context doc and asks for segmentation masks. This needs a Gemini model that supports masks (2.5+).
 - **Frontend:** `diagnosisClient.ts` reuses `captureSnapshot()` and `buildAnnotateEndpoint`-style URL handling.
 - Show the masks as a 2D canvas overlay, coloured per class, with accept/reject per region.
@@ -148,17 +149,17 @@ src/flaw/
 
 ---
 
-## 7. Open questions
+## 7. Decisions (previously open questions)
 
-**For the user (these change the design):**
-1. **Training cameras:** are COLMAP `cameras.bin`/`images.bin` or `transforms.json` available for the scenes? They decide whether M3 uses real probe views or synthetic orbit views.
-2. **Backend:** can `server.ts` in the separate repo be modified? Which Gemini model and SDK version does it use? Mask support depends on the model.
-3. **Interaction:** click a flaw to diagnose it, or "scan this view" for all flaws?
-4. **Applying edits:** require user confirmation for every edit, or auto-apply with undo?
-5. **Formats:** must `.sog` scenes be editable, or is PLY enough? SOG is quantised; round-tripping it is lossy and needs a separate writer.
-6. **Deliverable:** edited PLY, a GaussFlaw-style annotation dataset, or both?
+| # | Question | Decision | Rationale |
+|---|---|---|---|
+| 1 | **Training cameras** | **Synthetic orbit probe views for now.** Add a COLMAP / `transforms.json` loader later. | `public/` has no `cameras.bin`, `images.bin` or `transforms.json`. Orbit views are enough for the first demo, which uses N = 1. If training data for City_Block or Apartment turns up, its cameras replace the orbit views and remove the "orbit probes miss floaters" risk. |
+| 2 | **Backend** | **Modify `server.ts`.** Add `/api/diagnose` and leave `/api/annotate` unchanged. | The server currently uses `MODEL_NAME = "gemini-3-pro-image"` (`server.ts:16`) through the legacy `@google/generative-ai` SDK. That is an image-generation model, not a detection/segmentation one. `@google/genai` v2.8 is already in `package.json`, so the new endpoint uses it with a vision model that returns segmentation masks. **First step of M1:** test mask output on a single image before building on it. |
+| 3 | **Interaction** | **Click a flaw first; add "Scan this view" later.** | Clicking matches the current annotate flow and gives Gemini one small area to look at, which should be more accurate. Scan-all reuses the same pipeline afterwards. |
+| 4 | **Applying edits** | **Preview → confirm → apply, with undo/redo.** | Gemini masks and labels can be wrong, and pruning deletes splats permanently on export. The highlight and the planned edit are shown first; the user presses Apply. Auto-apply may become an option once results are reliable. |
+| 5 | **Formats** | **PLY only.** | `public/` has both `Apartment.ply` and `Apartment.sog`; City_Block is PLY. SOG is quantised, so editing it is lossy and needs its own writer. SOG-only scenes are converted to PLY outside the viewer. |
+| 6 | **Deliverable** | **Edited PLY first; GaussFlaw-style annotation export as optional M7b.** | The edited PLY is the visible result for the demo. The annotation export (mask PNG + class JSON per view) is cheap once M2 exists and is useful for evaluation or building a dataset. |
 
-**From the paper (unlikely to be resolved; defaults from the context doc stand):**
-- The detection rule for "anisotropic ghosting".
-- The exact "surface support" test and the pruning budget.
-- Whether GeoCritic weights are released. If they are, they could replace or cross-check Gemini; Gemini only gives binary masks, with no continuous saliency.
+**From the paper (unlikely to be resolved):**
+- The detection rule for "anisotropic ghosting", the exact "surface support" test and the pruning budget are not given in the paper. **Decision:** keep the `[ours]` defaults from the context doc and expose them as tunable settings.
+- **GeoCritic weights:** before M1, check the paper's GitHub or project page for released weights. If they are released, a small Python service running GeoCritic could replace or cross-check Gemini and provide continuous saliency instead of binary masks.

@@ -1,11 +1,11 @@
 import { Vector3, Box3 } from "three";
 import { DBSCAN } from "density-clustering";
 
-interface SemanticToken {
-  id: string;
-  label: string;
-  worldPos: Vector3;
-}
+// interface SemanticToken {
+//   id: string;
+//   label: string;
+//   worldPos: Vector3;
+// }
 
 // export default class GeometricContextManager {
 //     private globalMemory: Map<string, SemanticToken> = new Map();

@@ -14,6 +14,14 @@ import {
 import GeometricContextManager from "./GeometricContextManager/GeometricContextManager";
 import type { CandidatePoint } from "./compute/types";
 import { MeasureLineTool, type ScreenProjection } from "./measure/MeasureLineTool";
+import { diagnose, buildDiagnoseEndpoint } from "./flaw/diagnosisClient";
+import { decodeRegions } from "./flaw/regions";
+import { GaussianStore } from "./flaw/GaussianStore";
+import type { EditRecord, LiftResult, Region } from "./flaw/types";
+import { liftRegion } from "./flaw/lift";
+import { buildWorldAttributes, createHighlight, disposeHighlight, editableSplats, syncSplats } from "./flaw/preview";
+import { RectificationHistory, rectificationNotice } from "./flaw/rectify";
+import { downloadRectifiedPly } from "./flaw/exportPly";
 // import { OrbitControls } from "three/examples/jsm/Addons.js";
 
 const API_BASE_URL =
@@ -66,23 +74,32 @@ export class SplatViewer {
   private spark: SparkRenderer;
   private controls: SparkControls;
   private currentSplat: SplatMesh | null = null;
-  private desiredCameraHeight = 0.15;
   private isMobile: boolean = isMobileDevice();
   private cameraRig = new THREE.Group();
   private animateT = dyno.dynoFloat(0);
   private baseTime = 0;
   private splatLoaded = false;
   private annotations: { element: HTMLElement; position: THREE.Vector3 }[] = [];
-  private selectionBox: HTMLElement | null = null;
-  private startPoint: { x: number; y: number } | null = null;
-  private activeTool: "none" | "annotate" | "measure" = "none";
+  private activeTool: "none" | "annotate" | "diagnose" | "measure" = "none";
   private pointerDownPos: { x: number; y: number } | null = null;
   private annotationLoadingEl: HTMLElement | null = null;
   private annotationToolButton: HTMLButtonElement | null = null;
+  private diagnoseToolButton: HTMLButtonElement | null = null;
   private measureToolButton: HTMLButtonElement | null = null;
   private measureTool: MeasureLineTool | null = null;
   private readonly geometricContext = new GeometricContextManager();
   private activeBoxHelper: THREE.Box3Helper | null = null;
+  private gaussianStore: GaussianStore | null = null;
+  private worldLoadVersion = 0;
+  private worldLoadController: AbortController | null = null;
+  private diagnosisPending = false;
+  private diagnosisVersion = 0;
+  private diagnosisPanel: HTMLElement | null = null;
+  private rectificationHistory = new RectificationHistory();
+  private worldAttributes: ReturnType<typeof buildWorldAttributes> | null = null;
+  private selection: LiftResult | null = null;
+  private selectionHighlight: THREE.Points | null = null;
+  private sceneName = "scene";
 
   constructor() {
     this.scene = new THREE.Scene();
@@ -123,6 +140,7 @@ export class SplatViewer {
     this.setMobileControls();
     this.setupEventListeners();
     this.setupAnnotationUI();
+    this.setupDiagnosisUI();
     this.setupMeasureUI();
     // this.setupSelectionBox();
     this.setupClickInteraction();
@@ -162,7 +180,6 @@ export class SplatViewer {
     this.renderer.setAnimationLoop((time) => {
       this.controls.update(this.cameraRig);
       this.camera.updateMatrixWorld();
-      // this.lockCameraHeightToGround();
       const MOVE_SPEED = 2.0;
       const deltaTime = (time - lastTime) / 1000;
       lastTime = time;
@@ -217,6 +234,10 @@ export class SplatViewer {
         this.measureTool?.handleClick(x, y);
         return;
       }
+      if (this.activeTool === "diagnose") {
+        void this.requestDiagnosisFromGemini(x, y);
+        return;
+      }
 
       const clickWorldPos = this.getAnnotationPosition(x, y);
       console.log(`User clicked at: x=${x.toFixed(2)}, y=${y.toFixed(2)}`);
@@ -232,6 +253,8 @@ export class SplatViewer {
         const activating = !btn.classList.contains("active");
         if (activating) {
           this.measureToolButton?.classList.remove("active");
+          this.diagnoseToolButton?.classList.remove("active");
+          this.closeDiagnosisPanel();
           this.measureTool?.deactivate();
           this.activeTool = "annotate";
           btn.classList.add("active");
@@ -243,6 +266,26 @@ export class SplatViewer {
     }
   }
 
+  private setupDiagnosisUI() {
+    const btn = document.getElementById("diagnoseToolButton");
+    if (!btn) return;
+    this.diagnoseToolButton = btn as HTMLButtonElement;
+    btn.addEventListener("click", () => {
+      const activating = !btn.classList.contains("active");
+      if (activating) {
+        this.annotationToolButton?.classList.remove("active");
+        this.measureToolButton?.classList.remove("active");
+        this.measureTool?.deactivate();
+        this.activeTool = "diagnose";
+        btn.classList.add("active");
+      } else {
+        this.activeTool = "none";
+        btn.classList.remove("active");
+        this.closeDiagnosisPanel();
+      }
+    });
+  }
+
   private setupMeasureUI() {
     const btn = document.getElementById("measureToolButton");
     if (!btn) return;
@@ -252,6 +295,8 @@ export class SplatViewer {
       const activating = !btn.classList.contains("active");
       if (activating) {
         this.annotationToolButton?.classList.remove("active");
+        this.diagnoseToolButton?.classList.remove("active");
+        this.closeDiagnosisPanel();
         this.activeTool = "measure";
         btn.classList.add("active");
         this.measureTool?.activate();
@@ -357,25 +402,64 @@ export class SplatViewer {
   }
 
   public async loadWorld(url: string) {
-    if (this.currentSplat) {
-      this.scene.remove(this.currentSplat);
-      this.currentSplat = null;
+    const version = ++this.worldLoadVersion;
+    this.worldLoadController?.abort();
+    const controller = new AbortController();
+    this.worldLoadController = controller;
+    this.closeDiagnosisPanel();
+    let store: GaussianStore | null = null;
+    let fileBytes: ArrayBuffer | undefined;
+    if (/\.ply(?:$|[?#])/i.test(url)) {
+      try {
+        const response = await fetch(url, { signal: controller.signal });
+        if (!response.ok) throw new Error(`Could not load PLY (${response.status})`);
+        fileBytes = await response.arrayBuffer();
+      } catch (error) {
+        if (version !== this.worldLoadVersion) return;
+        throw error;
+      }
     }
-    const splat = new SplatMesh({ url });
+    if (version !== this.worldLoadVersion) return;
+    const splat = new SplatMesh(fileBytes ? { fileBytes, fileName: "scene.ply", lod: false } : { url });
     splat.quaternion.set(1, 0, 0, 0);
     splat.position.set(0, -1.5, 0);
+    // Attach immediately; editable-store parsing must not delay the renderer.
+    const previousSplat = this.currentSplat;
+    this.scene.add(splat);
     this.currentSplat = splat;
-    this.scene.add(this.currentSplat);
+    this.gaussianStore = null;
+    this.worldAttributes = null;
+    this.rectificationHistory = new RectificationHistory();
+    this.sceneName = url.split(/[?#]/)[0].split("/").pop() || "scene";
+    if (previousSplat) {
+      this.scene.remove(previousSplat);
+      previousSplat.dispose();
+    }
+    if (fileBytes) {
+      try {
+        store = GaussianStore.fromBytes(fileBytes);
+        console.info(`Editable Gaussian store loaded: ${store.vertexCount.toLocaleString()} splats`);
+      } catch (error) {
+        console.warn("PLY editing is unavailable for this scene:", error);
+      }
+    }
+    this.gaussianStore = store;
+    this.splatLoaded = false;
+    try {
+      await splat.initialized;
+    } catch (error) {
+      if (version !== this.worldLoadVersion) return;
+      this.scene.remove(splat);
+      splat.dispose();
+      this.currentSplat = null;
+      this.gaussianStore = null;
+      throw error;
+    }
+    if (version !== this.worldLoadVersion) return;
     this.splatLoaded = true;
+    if (!this.scene.getObjectByName("GroundPlane")) this.addGroundPlane();
+  }
 
-    // setupSplatModifier(this.currentSplat);
-    this.addGroundPlane();
-  }
-  private lockCameraHeightToGround() {
-    // Game-style: keep the rig at a fixed height above the world origin (Y=0 ground).
-    // The camera sits at local Y=0 inside the rig, so the rig's Y IS the eye height.
-    this.cameraRig.position.y = this.desiredCameraHeight;
-  }
   private getAnnotationPosition(
     normalizedX: number,
     normalizedY: number,
@@ -549,8 +633,8 @@ export class SplatViewer {
         const depthNdc = hasValidDepth ? depth * 2 - 1 : Number.NaN;
         const depthPos = hasValidDepth
           ? new THREE.Vector3(sampleX * 2 - 1, -(sampleY * 2 - 1), depthNdc).unproject(
-              this.camera,
-            )
+            this.camera,
+          )
           : null;
         let finalPos: THREE.Vector3 | null = null;
         let flags = 0;
@@ -693,6 +777,158 @@ export class SplatViewer {
 
     return this.renderer.domElement.toDataURL("image/jpeg", 0.7);
   }
+
+  private closeDiagnosisPanel() {
+    this.diagnosisVersion++;
+    this.clearSelection();
+    this.diagnosisPanel?.remove();
+    this.diagnosisPanel = null;
+  }
+
+  private clearSelection() {
+    disposeHighlight(this.selectionHighlight);
+    this.selectionHighlight = null;
+    this.selection = null;
+  }
+
+  /** Selects the Gaussians responsible for a region as seen from the diagnosis camera. */
+  private selectRegion(region: Region, viewProjection: THREE.Matrix4): string {
+    this.clearSelection();
+    const store = this.gaussianStore;
+    if (!store || !this.currentSplat) return "Selection needs an editable binary PLY scene.";
+    this.currentSplat.updateMatrixWorld(true);
+    this.worldAttributes ??= buildWorldAttributes(store, this.currentSplat.matrixWorld);
+    const started = performance.now();
+    const { result, stats } = liftRegion({
+      ...this.worldAttributes, skip: store.isPruned, viewProjection: viewProjection.elements,
+      mask: region.pixels, width: region.width, height: region.height, bbox: region.bbox, class: region.class,
+    });
+    console.info(`Lifted ${region.class} in ${(performance.now() - started).toFixed(0)} ms`, stats);
+    if (!result.indices.length) return "No visible Gaussians project into this region.";
+    this.selection = result;
+    this.selectionHighlight = createHighlight(this.worldAttributes.centers, result.indices, result.detached);
+    this.scene.add(this.selectionHighlight);
+    const notice = rectificationNotice(region.class);
+    return `${result.indices.length.toLocaleString()} Gaussians selected (${stats.detached.toLocaleString()} detached, shown red).${notice ? ` ${notice}` : ""}`;
+  }
+
+  private applySelection(): string {
+    const store = this.gaussianStore;
+    const selection = this.selection;
+    if (!store || !this.currentSplat || !selection) return "Nothing selected.";
+    const notice = rectificationNotice(selection.class);
+    if (notice) return notice;
+    if (!editableSplats(this.currentSplat, store)) {
+      return "Renderer splat order does not match the PLY, so the edit cannot be previewed and was not applied.";
+    }
+    const records = this.rectificationHistory.apply(store, selection);
+    this.syncRecords(records);
+    this.clearSelection();
+    if (!records.length) return "The rectification rules produced no changes for this selection.";
+    const counts = records.map(record => `${record.property === "$pruned" ? "pruned" : record.property}: ${record.indices.length}`);
+    return `Applied (${counts.join(", ")}).`;
+  }
+
+  /** Pushes store edits for the touched Gaussians into the renderer and the lifting cache. */
+  private syncRecords(records: EditRecord[] | undefined) {
+    const store = this.gaussianStore;
+    if (!store || !this.currentSplat || !records?.length) return;
+    const splats = editableSplats(this.currentSplat, store);
+    if (!splats) return;
+    const touched = new Set<number>();
+    records.forEach(record => record.indices.forEach(index => touched.add(index)));
+    syncSplats(splats, store, touched);
+    const attributes = this.worldAttributes;
+    if (!attributes) return;
+    const scaleFactor = this.currentSplat.matrixWorld.getMaxScaleOnAxis();
+    touched.forEach(i => {
+      attributes.alphas[i] = 1 / (1 + Math.exp(-store.get(i, "opacity")));
+      attributes.radii[i] = Math.exp(Math.max(store.get(i, "scale_0"), store.get(i, "scale_1"), store.get(i, "scale_2"))) * scaleFactor;
+    });
+  }
+
+  private renderDiagnosisPanel(regions: Region[], viewProjection: THREE.Matrix4) {
+    this.clearSelection();
+    this.diagnosisPanel?.remove();
+    const panel = document.createElement("section");
+    panel.className = "diagnosis-panel";
+    const heading = document.createElement("strong");
+    heading.textContent = "Flaw regions";
+    const status = document.createElement("span");
+    status.className = "diagnosis-status";
+    const editable = Boolean(this.gaussianStore);
+    status.textContent = `${regions.length} detected component(s).${editable ? " Select a region to highlight its Gaussians." : " Editing unavailable: scene is not a binary PLY."}`;
+
+    const button = (label: string, onClick: () => void) => {
+      const el = document.createElement("button");
+      el.textContent = label;
+      el.onclick = onClick;
+      return el;
+    };
+    const apply = button("Apply", () => { status.textContent = this.applySelection(); refresh(); });
+    const undo = button("Undo", () => {
+      this.syncRecords(this.gaussianStore ? this.rectificationHistory.undo(this.gaussianStore) : undefined);
+      status.textContent = "Undone.";
+      refresh();
+    });
+    const redo = button("Redo", () => {
+      this.syncRecords(this.gaussianStore ? this.rectificationHistory.redo(this.gaussianStore) : undefined);
+      status.textContent = "Redone.";
+      refresh();
+    });
+    const exportPly = button("Export PLY", () => {
+      if (this.gaussianStore) downloadRectifiedPly(this.gaussianStore, this.sceneName);
+    });
+    const close = button("Close", () => this.closeDiagnosisPanel());
+    const refresh = () => {
+      apply.disabled = !this.selection || Boolean(rectificationNotice(this.selection.class));
+      undo.disabled = !editable || !this.rectificationHistory.canUndo;
+      redo.disabled = !editable || !this.rectificationHistory.canRedo;
+      exportPly.disabled = !this.gaussianStore?.hasEdits;
+    };
+
+    panel.append(heading, status);
+    regions.forEach((region) => {
+      const row = document.createElement("div");
+      row.className = "diagnosis-row";
+      const label = document.createElement("span");
+      label.textContent = `${region.class} (${region.confidence.toFixed(2)})`;
+      const select = button("Select", () => { status.textContent = this.selectRegion(region, viewProjection); refresh(); });
+      select.disabled = !editable;
+      row.append(label, select);
+      panel.appendChild(row);
+    });
+    const actions = document.createElement("div");
+    actions.className = "diagnosis-actions";
+    actions.append(apply, undo, redo, exportPly, close);
+    panel.appendChild(actions);
+    refresh();
+    document.body.appendChild(panel);
+    this.diagnosisPanel = panel;
+  }
+
+  private async requestDiagnosisFromGemini(clickX: number, clickY: number) {
+    if (this.diagnosisPending) return;
+    this.diagnosisPending = true;
+    const version = ++this.diagnosisVersion;
+    try {
+      this.setAnnotationLoading(true);
+      const dataUrl = await this.captureSnapshot();
+      // Lifting must use the camera that produced the snapshot, not wherever the user orbits next.
+      const viewProjection = new THREE.Matrix4().multiplyMatrices(this.camera.projectionMatrix, this.camera.matrixWorldInverse);
+      const response = await diagnose(buildDiagnoseEndpoint(API_BASE_URL), dataUrl, { x: clickX, y: clickY }, BYPASS_TUNNEL_REMINDER);
+      const regions = await decodeRegions(response, this.renderer.domElement.width, this.renderer.domElement.height);
+      if (version === this.diagnosisVersion && this.activeTool === "diagnose") this.renderDiagnosisPanel(regions, viewProjection);
+    } catch (error) {
+      if (version === this.diagnosisVersion) {
+        console.error("Diagnosis error:", error);
+        window.alert(`Diagnosis failed: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    } finally {
+      this.diagnosisPending = false;
+      this.setAnnotationLoading(false);
+    }
+  }
   // public async requestAnnotationFromGemini(box: number[]) {
   //     try {
   //         // const dataUrl = this.renderer.domElement.toDataURL("image/jpeg", 0.7);
@@ -789,4 +1025,4 @@ export async function loadWorld(url: string) {
 // Initial load
 // const initialURL = "/Apartment.sog";
 const initialURL = "/Apartment.ply";
-loadWorld(initialURL);
+void loadWorld(initialURL).catch((error) => console.error("Initial scene load failed:", error));
