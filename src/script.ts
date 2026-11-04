@@ -788,5 +788,5 @@ export async function loadWorld(url: string) {
 
 // Initial load
 // const initialURL = "/Apartment.sog";
-const initialURL = "/BiltmoreGaussianSplat.ply";
+const initialURL = "/Apartment.ply";
 loadWorld(initialURL);
