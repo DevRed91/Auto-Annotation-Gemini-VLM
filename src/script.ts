@@ -1,7 +1,6 @@
 /// <reference types="vite/client" />
 
 import * as THREE from "three";
-import { TransformControls } from "three/addons/controls/TransformControls.js";
 import {
   SparkControls,
   SparkRenderer,
@@ -49,7 +48,6 @@ export class SplatViewer {
   private renderer: THREE.WebGLRenderer;
   private spark: SparkRenderer;
   private controls: SparkControls;
-  private transformControls!: TransformControls;
   private cube!: THREE.Mesh;
   private currentSplat: SplatMesh | null = null;
   private desiredCameraHeight = 0.15;
@@ -87,21 +85,20 @@ export class SplatViewer {
     this.renderer.setPixelRatio(window.devicePixelRatio);
     document.body.appendChild(this.renderer.domElement);
     this.controls = new SparkControls({ canvas: this.renderer.domElement });
-    // Reserve S for the TransformControls scale shortcut instead of walking backward.
-    delete this.controls.fpsMovement.keycodeMoveMapping.KeyS;
 
     this.spark = new SparkRenderer({ renderer: this.renderer });
     this.scene.add(this.spark);
     this.cube = this.addBox();
-    this.transformControls = new TransformControls(
-      this.camera,
-      this.renderer.domElement,
-    );
-    this.transformControls.attach(this.cube);
-    this.scene.add(this.transformControls.getHelper());
-    this.transformControls.addEventListener("dragging-changed", (event) => {
-      this.controls.pointerControls.enable = !event.value;
-    });
+    // Transform, scale, and rotation gizmo disabled for now.
+    // this.transformControls = new TransformControls(
+    //   this.camera,
+    //   this.renderer.domElement,
+    // );
+    // this.transformControls.attach(this.cube);
+    // this.scene.add(this.transformControls.getHelper());
+    // this.transformControls.addEventListener("dragging-changed", (event) => {
+    //   this.controls.pointerControls.enable = !event.value;
+    // });
     this.setMobileControls();
     this.setupEventListeners();
     this.setupAnnotationUI();
@@ -138,13 +135,11 @@ export class SplatViewer {
       if (event.key === "Enter") {
         console.log("Cube position:", this.cube.position.toArray());
         console.log("Cube scale:", this.cube.scale.toArray());
-      } else if (event.key.toLowerCase() === "s") {
-        this.transformControls.setMode("scale");
-      } else if (event.key.toLowerCase() === "t") {
-        this.transformControls.setMode("translate");
-      } else if (event.key.toLowerCase() === "r") {
-        this.transformControls.setMode("rotate");
       }
+      // TransformControls mode shortcuts disabled with the gizmo.
+      // if (event.key.toLowerCase() === "s") this.transformControls.setMode("scale");
+      // if (event.key.toLowerCase() === "t") this.transformControls.setMode("translate");
+      // if (event.key.toLowerCase() === "r") this.transformControls.setMode("rotate");
     });
   }
 
@@ -157,9 +152,7 @@ export class SplatViewer {
   private startAnimationLoop() {
     let lastTime = performance.now();
     this.renderer.setAnimationLoop((time) => {
-      if (!this.transformControls.dragging) {
-        this.controls.update(this.cameraRig);
-      }
+      this.controls.update(this.cameraRig);
       this.camera.updateMatrixWorld(); 
       this.syncApartmentOBBs();
       // this.lockCameraHeightToGround();
@@ -179,7 +172,7 @@ export class SplatViewer {
     });
   }
 
-  /** Keep OBBs that track a live object (e.g. the gizmo-driven cube) current. */
+  /** Keep OBBs that track a live object current. */
   private syncApartmentOBBs() {
     let hoveredMoved = false;
     for (const apt of this.apartments) {
@@ -226,7 +219,7 @@ export class SplatViewer {
   private setupHoverInteraction() {
     const canvas = this.renderer.domElement;
     canvas.addEventListener("pointermove", (e) => {
-      if (!this.hoverTint || this.transformControls.dragging) return;
+      if (!this.hoverTint) return;
       const rect = canvas.getBoundingClientRect();
       const ndc = new THREE.Vector2(
         ((e.clientX - rect.left) / rect.width) * 2 - 1,
