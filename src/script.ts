@@ -1,4 +1,7 @@
+/// <reference types="vite/client" />
+
 import * as THREE from "three";
+import { TransformControls } from "three/addons/controls/TransformControls.js";
 import {
   SparkControls,
   SparkRenderer,
@@ -11,6 +14,7 @@ import {
   initMobileControls,
   isMobileDevice,
 } from "./utils/mobileJoystick";
+import { HoverTint, OBB, pickNearestOBB } from "./utils/hoverTint";
 // import { OrbitControls } from "three/examples/jsm/Addons.js";
 
 const API_BASE_URL =
@@ -45,6 +49,8 @@ export class SplatViewer {
   private renderer: THREE.WebGLRenderer;
   private spark: SparkRenderer;
   private controls: SparkControls;
+  private transformControls!: TransformControls;
+  private cube!: THREE.Mesh;
   private currentSplat: SplatMesh | null = null;
   private desiredCameraHeight = 0.15;
   private isMobile: boolean = isMobileDevice();
@@ -57,6 +63,10 @@ export class SplatViewer {
   private startPoint: { x: number; y: number } | null = null;
   private isSelecting = false;
   private annotationLoadingEl: HTMLElement | null = null;
+  private hoverTint: HoverTint | null = null;
+  private apartments: { id: string; obb: OBB; source?: THREE.Object3D; geomSize?: THREE.Vector3 }[] = [];
+  private hoveredApartment: { id: string; obb: OBB } | null = null;
+  private hoverRaycaster = new THREE.Raycaster();
 
   constructor() {
     this.scene = new THREE.Scene();
@@ -77,15 +87,30 @@ export class SplatViewer {
     this.renderer.setPixelRatio(window.devicePixelRatio);
     document.body.appendChild(this.renderer.domElement);
     this.controls = new SparkControls({ canvas: this.renderer.domElement });
+    // Reserve S for the TransformControls scale shortcut instead of walking backward.
+    delete this.controls.fpsMovement.keycodeMoveMapping.KeyS;
 
     this.spark = new SparkRenderer({ renderer: this.renderer });
     this.scene.add(this.spark);
+    this.cube = this.addBox();
+    this.transformControls = new TransformControls(
+      this.camera,
+      this.renderer.domElement,
+    );
+    this.transformControls.attach(this.cube);
+    this.scene.add(this.transformControls.getHelper());
+    this.transformControls.addEventListener("dragging-changed", (event) => {
+      this.controls.pointerControls.enable = !event.value;
+    });
     this.setMobileControls();
     this.setupEventListeners();
     this.setupAnnotationUI();
     // this.setupSelectionBox();
     this.setupClickInteraction();
+    this.setupHoverInteraction();
     this.setupLoadingUI();
+    // Demo: treat the green box as an apartment unit. Replace with real OBBs.
+    this.registerApartment("demo-cube", this.cube, new THREE.Vector3(0.13, 1, 0.1));
     this.startAnimationLoop();
   }
 
@@ -107,6 +132,20 @@ export class SplatViewer {
 
   private setupEventListeners() {
     window.addEventListener("resize", () => this.onWindowResize());
+    window.addEventListener("keydown", (event) => {
+      if (event.repeat || event.ctrlKey || event.metaKey || event.altKey) return;
+
+      if (event.key === "Enter") {
+        console.log("Cube position:", this.cube.position.toArray());
+        console.log("Cube scale:", this.cube.scale.toArray());
+      } else if (event.key.toLowerCase() === "s") {
+        this.transformControls.setMode("scale");
+      } else if (event.key.toLowerCase() === "t") {
+        this.transformControls.setMode("translate");
+      } else if (event.key.toLowerCase() === "r") {
+        this.transformControls.setMode("rotate");
+      }
+    });
   }
 
   private onWindowResize() {
@@ -118,8 +157,11 @@ export class SplatViewer {
   private startAnimationLoop() {
     let lastTime = performance.now();
     this.renderer.setAnimationLoop((time) => {
-      this.controls.update(this.cameraRig);
+      if (!this.transformControls.dragging) {
+        this.controls.update(this.cameraRig);
+      }
       this.camera.updateMatrixWorld(); 
+      this.syncApartmentOBBs();
       // this.lockCameraHeightToGround();
       const MOVE_SPEED = 2.0;
       const deltaTime = (time - lastTime) / 1000;
@@ -135,6 +177,22 @@ export class SplatViewer {
       this.updateAnnotationLabels();
       this.renderer.render(this.scene, this.camera);
     });
+  }
+
+  /** Keep OBBs that track a live object (e.g. the gizmo-driven cube) current. */
+  private syncApartmentOBBs() {
+    let hoveredMoved = false;
+    for (const apt of this.apartments) {
+      if (!apt.source || !apt.geomSize) continue;
+      const before = apt.obb.getWorldMatrix().elements.join() + apt.obb.size.toArray().join();
+      apt.obb.syncFromObject3D(apt.source, apt.geomSize);
+      const after = apt.obb.getWorldMatrix().elements.join() + apt.obb.size.toArray().join();
+      if (before !== after && apt.id === this.hoveredApartment?.id) hoveredMoved = true;
+    }
+    if (hoveredMoved && this.hoverTint) {
+      this.hoverTint.refresh();
+      this.currentSplat?.updateVersion();
+    }
   }
 
   private setupClickInteraction() {
@@ -153,6 +211,40 @@ export class SplatViewer {
       this.requestAnnotationFromGemini(x, y, clickWorldPos);
     });
   }
+
+  /** Register an apartment OBB. Pass a source object to keep the OBB synced to it. */
+  public registerApartment(id: string, source: THREE.Object3D, geomSize: THREE.Vector3): void;
+  public registerApartment(id: string, obb: OBB): void;
+  public registerApartment(id: string, a: THREE.Object3D | OBB, geomSize?: THREE.Vector3) {
+    if (a instanceof OBB) {
+      this.apartments.push({ id, obb: a });
+    } else {
+      this.apartments.push({ id, obb: OBB.fromObject3D(a, geomSize!), source: a, geomSize });
+    }
+  }
+
+  private setupHoverInteraction() {
+    const canvas = this.renderer.domElement;
+    canvas.addEventListener("pointermove", (e) => {
+      if (!this.hoverTint || this.transformControls.dragging) return;
+      const rect = canvas.getBoundingClientRect();
+      const ndc = new THREE.Vector2(
+        ((e.clientX - rect.left) / rect.width) * 2 - 1,
+        -((e.clientY - rect.top) / rect.height) * 2 + 1,
+      );
+      this.hoverRaycaster.setFromCamera(ndc, this.camera);
+      const hit = pickNearestOBB(this.hoverRaycaster.ray, this.apartments);
+      if (hit?.id === this.hoveredApartment?.id) return;
+      this.hoveredApartment = hit;
+      console.log("[hover]", hit?.id ?? null, hit?.obb.size.toArray());
+      this.hoverTint.setHovered(hit ? hit.obb : null);
+    });
+    canvas.addEventListener("pointerleave", () => {
+      this.hoveredApartment = null;
+      this.hoverTint?.setHovered(null);
+    });
+  }
+
   private setupAnnotationUI() {
     const btn = document.getElementById("annotationToolButton");
     if (btn) {
@@ -246,6 +338,22 @@ export class SplatViewer {
     this.scene.add(plane);
   }
 
+  private addBox(): THREE.Mesh {
+    const geometry = new THREE.BoxGeometry(0.13, 1, 0.1);
+    const material = new THREE.MeshBasicMaterial({
+      color: 0x00ff00,
+      transparent: true,
+      opacity: 0,
+      depthWrite: false,
+    });
+    const box = new THREE.Mesh(geometry, material);
+    box.name = "GreenBox";
+    box.position.set(-0.6797355047276763, -1.108790598191884, -1.3153952040011012);
+    box.scale.set(-2.8098998190647926, 0.25, 2.6582629401302826);
+    this.scene.add(box);
+    return box;
+  }
+
   public async loadWorld(url: string) {
     if (this.currentSplat) {
       this.scene.remove(this.currentSplat);
@@ -259,6 +367,7 @@ export class SplatViewer {
     this.splatLoaded = true;
 
     // setupSplatModifier(this.currentSplat);
+    this.hoverTint = new HoverTint(splat);
     this.addGroundPlane();
   }
   private lockCameraHeightToGround() {
@@ -479,6 +588,6 @@ export async function loadWorld(url: string) {
 }
 
 // Initial load
-const initialURL = "/Apartment.sog";
+const initialURL = "/City_Block.ply";
 // const initialURL = "/BiltmoreGaussianSplat.sog";
 loadWorld(initialURL);
