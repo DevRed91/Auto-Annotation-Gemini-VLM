@@ -1,5 +1,11 @@
 import * as THREE from "three";
 import {
+  applyQualityProfile,
+  getDeviceTier,
+  MAX_SCREEN_RADIUS,
+  type SplatQualityControls,
+} from "./utils/splatQuality";
+import {
   SparkControls,
   SparkRenderer,
   SplatMesh,
@@ -44,6 +50,7 @@ export class SplatViewer {
   private camera: THREE.PerspectiveCamera;
   private renderer: THREE.WebGLRenderer;
   private spark: SparkRenderer;
+  private splatQuality: SplatQualityControls;
   private controls: SparkControls;
   private currentSplat: SplatMesh | null = null;
   private desiredCameraHeight = 0.15;
@@ -78,7 +85,18 @@ export class SplatViewer {
     document.body.appendChild(this.renderer.domElement);
     this.controls = new SparkControls({ canvas: this.renderer.domElement });
 
-    this.spark = new SparkRenderer({ renderer: this.renderer });
+    const tier = getDeviceTier();
+    this.spark = new SparkRenderer({
+      renderer: this.renderer,
+      maxPixelRadius: MAX_SCREEN_RADIUS[tier],
+    });
+    this.splatQuality = applyQualityProfile(this.spark, tier);
+    // Clamping shrinks/fades large splats, which destroys surfaces when the camera is close.
+    // Off by default; enable via setClampingActive(true) on devices that need it.
+    this.splatQuality.setClampingActive(false);
+    if (import.meta.env.DEV) {
+      window.__splatQuality = this.splatQuality;
+    }
     this.scene.add(this.spark);
     this.setMobileControls();
     this.setupEventListeners();
@@ -87,6 +105,14 @@ export class SplatViewer {
     this.setupClickInteraction();
     this.setupLoadingUI();
     this.startAnimationLoop();
+  }
+
+  public setMaxScreenRadius(px: number): void {
+    this.splatQuality.setMaxScreenRadius(px);
+  }
+
+  public setClampingActive(active: boolean): void {
+    this.splatQuality.setClampingActive(active);
   }
 
   private setupLoadingUI() {
@@ -480,5 +506,6 @@ export async function loadWorld(url: string) {
 
 // Initial load
 const initialURL = "/Apartment.sog";
-// const initialURL = "/BiltmoreGaussianSplat.sog";
+// const initialURL = "/City_Block.sog";
+// const initialURL = "/WatYanAngThong.sog";
 loadWorld(initialURL);
