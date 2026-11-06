@@ -40,7 +40,12 @@ function buildAnnotateEndpoint(baseUrl: string): string {
 
 interface AnnotationDetection {
   label: string;
-  box: [number, number, number, number];
+  description: string;
+  box: [ymin: number, xmin: number, ymax: number, xmax: number];
+}
+
+interface AnnotateResponse {
+  objects: AnnotationDetection[];
 }
 
 interface DimensionSet {
@@ -361,6 +366,7 @@ export class SplatViewer {
   private createAnnotationElement(
     position: THREE.Vector3,
     label: string,
+    description: string,
     dimensions?: DimensionSet,
   ) {
     const container = document.createElement("div");
@@ -369,6 +375,11 @@ export class SplatViewer {
     // Create the "Pin" (the dot)
     const pin = document.createElement("div");
     pin.className = "annotation-pin";
+
+    const labelButton = document.createElement("button");
+    labelButton.type = "button";
+    labelButton.className = "annotation-label";
+    labelButton.textContent = label;
 
     // Create the "Card" (the info)
     const card = document.createElement("div");
@@ -384,6 +395,9 @@ export class SplatViewer {
     closeBtn.className = "close-btn";
     closeBtn.textContent = "Close";
     card.appendChild(title);
+    const descriptionText = document.createElement("p");
+    descriptionText.textContent = description;
+    card.appendChild(descriptionText);
     // card.appendChild(closeBtn);
     card.style.display = "none"; // Hidden by default
 
@@ -392,12 +406,14 @@ export class SplatViewer {
       e.stopPropagation();
       card.style.display = card.style.display === "none" ? "block" : "none";
     };
+    labelButton.onclick = pin.onclick;
 
     closeBtn.addEventListener("click", () => {
       card.style.display = "none";
     });
 
     container.appendChild(pin);
+    container.appendChild(labelButton);
     container.appendChild(card);
     document.body.appendChild(container);
 
@@ -415,7 +431,7 @@ export class SplatViewer {
     const clamped = box.map((value) =>
       Number.isFinite(value) ? Math.min(1, Math.max(0, value)) : 0,
     ) as AnnotationDetection["box"];
-    const [xmin, ymin, xmax, ymax] = clamped;
+    const [ymin, xmin, ymax, xmax] = clamped;
     const width = xmax - xmin;
     const height = ymax - ymin;
     if (width < 0.02 || height < 0.02) {
@@ -428,7 +444,7 @@ export class SplatViewer {
     box: AnnotationDetection["box"],
     // gridSize = 10,
   ): THREE.Vector3[] {
-    const [xmin, ymin, xmax, ymax] = box;
+    const [ymin, xmin, ymax, xmax] = box;
     const points: THREE.Vector3[] = [];
     // Adaptive sampling: scale grid resolution based on the 2D bounding box area
     const width = xmax - xmin;
@@ -518,7 +534,8 @@ export class SplatViewer {
       this.renderMeasurementBox(measured.points);
       this.createAnnotationElement(
         measured.centroid.clone(),
-        detection.label,
+        measured.label,
+        detection.description,
         measured.dimensions,
       );
       return;
@@ -528,24 +545,26 @@ export class SplatViewer {
       this.createAnnotationElement(
         clickWorldPosAtClick.clone(),
         detection.label,
+        detection.description,
       );
       return;
     }
 
-    this.annotateDetectedObject(sanitizedBox, detection.label);
+    this.annotateDetectedObject(sanitizedBox, detection.label, detection.description);
   }
 
   private annotateDetectedObject(
     box: AnnotationDetection["box"],
     label: string,
+    description: string,
   ) {
-    const [xmin, ymin, xmax, ymax] = box;
+    const [ymin, xmin, ymax, xmax] = box;
     const centerX = (xmin + xmax) / 2;
     const centerY = (ymin + ymax) / 2;
 
     const worldPos = this.getAnnotationPosition(centerX, centerY);
     if (worldPos) {
-      this.createAnnotationElement(worldPos, label);
+      this.createAnnotationElement(worldPos, label, description);
     } else {
       console.warn(`Lifting failed for ${label}`);
     }
@@ -563,39 +582,6 @@ export class SplatViewer {
 
     return this.renderer.domElement.toDataURL("image/jpeg", 0.7);
   }
-  // public async requestAnnotationFromGemini(box: number[]) {
-  //     try {
-  //         // const dataUrl = this.renderer.domElement.toDataURL("image/jpeg", 0.7);
-  //         const dataUrl = await this.captureSnapshot();
-  //         const headers: Record<string, string> = { "Content-Type": "application/json" };
-
-  //         if (BYPASS_TUNNEL_REMINDER) {
-  //           headers["bypass-tunnel-reminder"] = "true";
-  //         }
-
-  //         const endpoint = buildAnnotateEndpoint(API_BASE_URL);
-
-  //         const response = await fetch(endpoint, {
-  //             method: "POST",
-  //             headers,
-  //             body: JSON.stringify({ image: dataUrl, userBox: box }),
-  //         });
-
-  //         const data = await response.json();
-
-  //         if (data.objects && Array.isArray(data.objects)) {
-  //             data.objects.forEach((item: any) => {
-  //                 // item.label is now whatever the AI decided it was!
-  //                 console.log(`Annotating detected object: ${item.label} at box ${item.box}`);
-  //                 const label = item.label === "objects" ? "Detected Item" : item.label;
-  //                 const description = item.description === "objects" ? "Detected Item" : item.description;
-  //                 this.annotateDetectedObject(item.box, label, description);
-  //             });
-  //         }
-  //     } catch (err) {
-  //         console.error("Annotation Error:", err);
-  //     }
-  //   }
   public async requestAnnotationFromGemini(
     clickX: number,
     clickY: number,
@@ -619,29 +605,36 @@ export class SplatViewer {
         }),
       });
 
-      if (!response.ok) throw new Error("Server error");
-      const data = await response.json();
-      this.disableAnnotationToolButton();
-      const detection: AnnotationDetection | null =
-        data && typeof data.label === "string" && Array.isArray(data.box)
-          ? data
-          : Array.isArray(data)
-            ? (data[0] ?? null)
-            : Array.isArray(data?.objects)
-              ? (data.objects[0] ?? null)
-              : null;
-
-      if (!detection?.label || !Array.isArray(detection.box)) {
-        console.warn(
-          "Expected single detection payload with label and box.",
-          data,
+      if (!response.ok) {
+        const { error } = await response.json().catch(() => ({
+          error: "Request failed",
+        }));
+        const guidance: Record<number, string> = {
+          400: "Fix the image or selection before trying again.",
+          413: "Use a smaller snapshot before trying again.",
+          429: "Wait a moment, then try again.",
+          502: "Annotation failed. Please try again.",
+          504: "Annotation timed out. Please try again.",
+          500: "Something went wrong. Please try again later.",
+        };
+        throw new Error(
+          response.status === 500
+            ? guidance[500]
+            : [error || "Request failed", guidance[response.status]].filter(Boolean).join(" "),
         );
+      }
+      const { objects }: AnnotateResponse = await response.json();
+      if (objects.length === 0) {
+        window.alert("Nothing found here. Try selecting another region.");
         return;
       }
-
-      this.annotateFromDetection(detection, clickWorldPosAtClick);
+      for (const detection of objects) {
+        this.annotateFromDetection(detection, clickWorldPosAtClick);
+      }
+      this.disableAnnotationToolButton();
     } catch (err) {
       console.error("Museum Mode Error:", err);
+      window.alert(err instanceof Error ? err.message : "Annotation failed. Please try again.");
     } finally {
       this.setAnnotationLoading(false);
     }
