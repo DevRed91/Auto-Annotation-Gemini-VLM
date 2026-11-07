@@ -238,6 +238,54 @@ Caveats: "only those splats change" is bounded by projected-bbox and region-equa
 
 ---
 
+### 8.2 Phase 1 results — Coordinates and OBB baseline (run 2026-11-07)
+
+Labels: **[S]** source-verified, **[B]** browser-validated (see environment), **[U]** not validated.
+
+**Integration strategy [S].** `main`'s extraction pipeline was merged into the hover-tint/probe branch (`bdf6386`, `git merge main`). The `script.ts` conflicts were resolved by keeping both sides. `public/Apartment-lod.rad` is kept; the initial URL is `/Apartment.sog`. The extraction algorithm (depth/raycast sampling, DBSCAN eps 0.3 / minPts 10) is unchanged. The new step runs after `renderMeasurementBox` in `annotateFromDetection`.
+
+**OBB algorithm [S][B].** `src/utils/obbFit.ts`, no new dependency.
+1. Centroid and 3x3 covariance of the accepted cluster's world-space points.
+2. Jacobi eigen-decomposition. Axes are sorted by descending eigenvalue, sign-normalised, and re-orthogonalised into a right-handed frame (z = x cross y).
+3. Project the points on the axes, take min/max, then centre and size, plus a 0.02 margin per side.
+4. AABB fallback (identity rotation) when n < 4, the largest eigenvalue <= 1e-10, or the second eigenvalue < 1e-6 x the first (collinear points).
+
+Observed in the browser: PCA for n=28 and n=77; AABB fallback for n=132 (points collinear: x/z size equals the 0.04 margin alone) and n=44 (cause not investigated). Fit plus uploading it to the shader took 0.2-0.5 ms in all four runs [B].
+
+**Coordinate chain [S].**
+- Extracted points are world space (raycast/depth unprojection). `fitOBB` returns a world OBB.
+- `obbWorldToLocal(world, splat)` re-expresses it in splat-local space: `local = inverse(splat.matrixWorld) * world`, rotation composed with the inverse's rotation, size scaled by the mean |scale| of the inverse. This **assumes uniform scale**; non-uniform scale is not handled [U].
+- In Spark's `objectModifier`, `gsplat.center` is splat-local, so the shader tests `inverse(obbLocal) * center` against the half extents. The scene transform is read from `splat.matrixWorld`; nothing is hardcoded. The initial transform here happens to be quaternion (x,y,z,w) = (1,0,0,0) (a 180 degree flip about X) and position (0,-1.5,0), which makes the flip a real test of the conversion.
+- **Anchoring decision:** the OBB is stored splat-local, so it follows the splat with no refit and no re-upload. A second `HoverTint` instance (`space:"splat"`, orange) holds the persistent highlight, so hover's `setHovered(null)` cannot clear it. `space:"world"` plus `syncSplatTransform()` (per-frame `matrixWorld` compare; refresh and `updateVersion` only on change) exists for world-anchored use. It is source-reviewed only and **not** exercised by a test [U].
+
+**Browser environment.** Playwright, headless Chrome with SwiftShader (software GL), vite dev server, `Apartment.sog` (699,086 splats), 400x300. `page.screenshot` hangs under SwiftShader, so frames are read with `canvas.toDataURL` (`window.__sl.capture()`, a DEV-only hook). **Gemini was not exercised**: a fixed 2D box is injected through `annotateFromDetection` via `__sl.inject`. Scripts: `scripts/phase1-validate.mjs` (A-F) and `scripts/phase1-diag.mjs` (alignment re-check with a 6 s settle). Raw output: `docs/phase1-screenshots/results.json` and `diag.json`; screenshots are in the same directory.
+
+| Test | Result |
+|---|---|
+| **A. Basic highlight** | **Pass [B].** Box [0.3,0.3,0.7,0.7] gives a PCA OBB (n=28, size 0.91x0.31x0.12). The tinted region sits inside the OBB wireframe (`A-basic-highlight.png`); 2307 px differ from baseline in bbox [192,128,220,213]. CPU count of splat centres inside the OBB = 893. |
+| **B. Current transform** | **Pass [B].** The local OBB centre pushed through `splat.matrixWorld` equals the world fit centre, error 1.1e-16 (with the 180 degree flip and y offset in place). The CPU count in world space equals the count in local space (893 = 893). |
+| **C. Translation** (x += 0.5, no refit) | **Pass [B] on re-check.** The CPU local count stays 893. With a 6 s settle the tint bbox [153,122,176,213] lies within the helper's projected bbox [148,126,177,209] (`diag-transX0.5-on.png`). A stale world-space count is 0, which shows why world anchoring would need a refit. The first run (1.5 s settle) produced a corrupted frame (`C-translated.png`, dark smeared splats); its pixel diffs (C_diffVsA, C_tintDiff) are **not meaningful** and the cause is not identified. |
+| **D. Rotation** (30 degrees about Y) | **Pass [B] on re-check.** Rotation only: tint bbox [197,121,218,214] against helper [192,126,220,209]. Rotation plus the earlier translation: still aligned. The CPU local count stays 893. The helper is parented to the splat. |
+| **E. Transform refresh** | **Pass for the splat-space design [B]; world-mode refresh [U].** `updateVersion` calls: 0 over 1 s idle, 0 over 1 s after moving the splat. The cluster highlight needs no refresh because it is splat-local. `syncSplatTransform()` for `space:"world"` was not tested. |
+| **F. Multiple sequential detections** | **Partial [B].** Three further injected boxes each fitted and highlighted. The wireframe helper count stayed at 1 (old helper disposed, no leak), and a new fit replaces the previous highlight. CPU counts were 1, 16386 and 4; the first and third boxes are tiny or hit sparse regions, and the second is a large 1.76x1.41x0.55 m box, so these are not clean "objects". The per-frame pixel diffs from this run used a 1.5 s settle and are unreliable, so alignment was not re-checked per detection. |
+
+Note on the blue box in the screenshots: it is the existing world-space measurement box (`renderMeasurementBox`). It is not attached to the splat, so it stays put when the splat moves, while the orange OBB tint and wireframe move with the splat. This is expected; it makes the translated and rotated screenshots show the orange region leaving the blue box.
+
+**Alignment evidence.** The check compares the projected screen bbox of the helper (scene graph, parented to the splat) with the bbox of the tint-on/off pixel difference (the shader), for identity, rotation and translation. They agree to within about 5 px in each case (identity: tint [193,129,218,213], helper [192,126,220,208]). This shows the shader highlight and the scene-graph OBB move together with the splat. It does not independently prove that the highlighted Gaussians are the true object, only that they are the ones inside the OBB fitted to the cluster (893 centres counted on the CPU).
+
+**Observed instability under SwiftShader.** With a 1.5 s settle, frames after a transform change were sometimes stale or corrupted (the first C run, and the D screenshot where the tint lagged one transform behind the splat). With a 6 s settle all three cases were clean. I did not determine whether this is Spark's accumulator/sort lagging at a very low frame rate or a harness effect. **It has not been tested on a GPU browser [U].**
+
+**Limitations and risks.**
+- Box membership, not per-splat association: Gaussians inside the OBB but in front of or behind the object are tinted (Phase 2 addresses this). 893 splats were inside the Test A box.
+- OBB quality depends on the cluster; thin or collinear clusters fall back to an axis-aligned box in world space, which is loose for rotated objects.
+- Uniform scale only. `Apartment.sog` only; LOD/`.rad` not tested [U]. Gemini end to end not tested [U]. Software GL only, one camera pose, 400x300 [U].
+- The OBB is captured at detection time and is not re-fit when the splat is edited.
+- Pre-existing and unrelated: `main.ts` throws on a null `generateBtn` at startup (does not block loading).
+
+**Phase 2 recommendation.** Replace box membership with per-splat association: collect the splat indices whose centre falls inside the OBB and whose projection lies in the cluster's depth-consistent pixels, and render them via a mask (Phase 0 showed CPU `forEachSplat` index equals shader `gsplat.index` for non-LOD). Keep the splat-local OBB as the coarse prefilter. Before that, re-run A-F on a GPU browser and settle the stale-frame question.
+
+---
+
 ## 9. Performance considerations
 
 - **CPU scan:** O(N) over splats, once per extraction. Target under 200 ms for ~1M splats [A]. If exceeded, move to a Worker over `packedArray`, or build a coarse grid for region queries.

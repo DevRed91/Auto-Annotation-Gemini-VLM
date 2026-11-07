@@ -14,6 +14,7 @@ import {
   isMobileDevice,
 } from "./utils/mobileJoystick";
 import { HoverTint, OBB, pickNearestOBB } from "./utils/hoverTint";
+import { fitOBB, obbWorldToLocal } from "./utils/obbFit";
 import GeometricContextManager from "./GeometricContextManager/GeometricContextManager";
 // import { OrbitControls } from "three/examples/jsm/Addons.js";
 
@@ -77,6 +78,8 @@ export class SplatViewer {
   private isSelecting = false;
   private annotationLoadingEl: HTMLElement | null = null;
   private hoverTint: HoverTint | null = null;
+  private clusterTint: HoverTint | null = null;
+  private clusterObbHelper: THREE.LineSegments | null = null;
   private apartments: { id: string; obb: OBB; source?: THREE.Object3D; geomSize?: THREE.Vector3 }[] = [];
   private hoveredApartment: { id: string; obb: OBB } | null = null;
   private hoverRaycaster = new THREE.Raycaster();
@@ -177,6 +180,8 @@ export class SplatViewer {
       this.controls.update(this.cameraRig);
       this.camera.updateMatrixWorld();
       this.syncApartmentOBBs();
+      this.hoverTint?.syncSplatTransform();
+      this.clusterTint?.syncSplatTransform();
       // this.lockCameraHeightToGround();
       const MOVE_SPEED = 2.0;
       const deltaTime = (time - lastTime) / 1000;
@@ -392,6 +397,8 @@ export class SplatViewer {
 
     // setupSplatModifier(this.currentSplat);
     this.hoverTint = new HoverTint(splat);
+    this.clusterTint = new HoverTint(splat, { space: "splat", color: [1, 0.35, 0.1], strength: 0.6 });
+    this.clusterObbHelper = null;
     this.addGroundPlane();
   }
   private lockCameraHeightToGround() {
@@ -598,6 +605,33 @@ export class SplatViewer {
     return points;
   }
 
+  /** Fit an OBB to the accepted cluster and highlight splat centres inside it. */
+  private highlightCluster(points: THREE.Vector3[]) {
+    const splat = this.currentSplat;
+    if (!splat || !this.clusterTint) return;
+    if (this.clusterObbHelper) {
+      this.clusterObbHelper.parent?.remove(this.clusterObbHelper);
+      this.clusterObbHelper.geometry.dispose();
+      this.clusterObbHelper = null;
+    }
+    const t0 = performance.now();
+    const fit = fitOBB(points);
+    if (!fit) { this.clusterTint.setHovered(null); return; }
+    // World-space fit -> splat-local so the highlight rides with the splat.
+    const local = obbWorldToLocal(fit.obb, splat);
+    this.clusterTint.setHovered(local);
+    console.log(`[OBB] ${fit.method} n=${points.length} fit+upload=${(performance.now() - t0).toFixed(2)}ms size=`, fit.obb.size.toArray());
+
+    const edges = new THREE.EdgesGeometry(new THREE.BoxGeometry(local.size.x, local.size.y, local.size.z));
+    const helper = new THREE.LineSegments(edges, new THREE.LineBasicMaterial({ color: 0xff8800 }));
+    helper.position.copy(local.position);
+    helper.quaternion.copy(local.quaternion);
+    splat.add(helper); // child of the splat -> follows its transform
+    this.clusterObbHelper = helper;
+    this.lastClusterFit = { world: fit.obb, local, points, method: fit.method };
+  }
+  public lastClusterFit: { world: OBB; local: OBB; points: THREE.Vector3[]; method: string } | null = null;
+
   private renderMeasurementBox(points: THREE.Vector3[]) {
     if (this.activeBoxHelper) {
       this.scene.remove(this.activeBoxHelper);
@@ -634,6 +668,7 @@ export class SplatViewer {
 
     if (measured) {
       this.renderMeasurementBox(measured.points);
+      this.highlightCluster(measured.points);
       this.createAnnotationElement(
         measured.centroid.clone(),
         measured.label,
@@ -755,3 +790,25 @@ export async function loadWorld(url: string) {
 const initialURL = "/Apartment.sog";
 // const initialURL = "/BiltmoreGaussianSplat.sog";
 loadWorld(initialURL);
+
+// DEV-only test hook: lets automated browser tests inject a fixed 2D detection
+// (bypassing Gemini) and inspect the splat / last OBB fit.
+if (import.meta.env.DEV) {
+  (window as any).__sl = {
+    viewer,
+    THREE,
+    get splat() { return (viewer as any).currentSplat; },
+    get camera() { return (viewer as any).camera; },
+    // Render now and return the canvas as PNG data URL (reliable under SwiftShader, unlike page.screenshot).
+    capture() {
+      const v = viewer as any;
+      v.renderer.render(v.scene, v.camera);
+      return v.renderer.domElement.toDataURL("image/png");
+    },
+    get lastFit() { return viewer.lastClusterFit; },
+    inject(label: string, box: [number, number, number, number]) {
+      (viewer as any).annotateFromDetection({ label, description: "test", box }, null);
+      return viewer.lastClusterFit;
+    },
+  };
+}

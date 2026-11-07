@@ -106,7 +106,12 @@ export function pickNearestOBB<T extends { obb: OBB }>(
  * tints splats whose center lies inside the hovered OBB. Object modifiers run
  * in splat-local space, so we feed Inverse(boxWorld) * splatWorld.
  *
- * NOTE: this occupies the SplatMesh's single `objectModifier` slot.
+ * The modifier is appended to `splat.objectModifiers` (never overwrites other
+ * modifiers). Two coordinate modes:
+ *  - "world": the OBB is in world space; uniforms depend on splat.matrixWorld
+ *    and must be refreshed when the splat moves (see syncSplatTransform()).
+ *  - "splat": the OBB is already in splat-local space (rides with the splat);
+ *    splatToBox = inverse(obbLocal), independent of splat.matrixWorld.
  */
 export class HoverTint {
   private splatToBox = dyno.dynoMat4(new THREE.Matrix4());
@@ -116,11 +121,20 @@ export class HoverTint {
   private strength = dyno.dynoFloat(0.45);
   private feather = dyno.dynoFloat(0.05);
   private current: OBB | null = null;
+  private modifier: unknown = null;
+  private lastSplatMatrix = new THREE.Matrix4();
+  private space: "world" | "splat";
 
   private _boxInv = new THREE.Matrix4();
   private _m = new THREE.Matrix4();
 
-  constructor(private splat: SplatMesh) {
+  constructor(
+    private splat: SplatMesh,
+    opts: { space?: "world" | "splat"; color?: [number, number, number]; strength?: number } = {},
+  ) {
+    this.space = opts.space ?? "world";
+    if (opts.color) this.color.value.set(...opts.color);
+    if (opts.strength !== undefined) this.strength.value = opts.strength;
     this.install();
   }
 
@@ -154,7 +168,7 @@ export class HoverTint {
         `),
     });
 
-    this.splat.objectModifier = dyno.dynoBlock(
+    const block = dyno.dynoBlock(
       { gsplat: dyno.Gsplat },
       { gsplat: dyno.Gsplat },
       ({ gsplat }) => ({
@@ -169,6 +183,9 @@ export class HoverTint {
         }).gsplat,
       }),
     );
+    this.modifier = block;
+    const existing = (this.splat as any).objectModifiers ?? [];
+    (this.splat as any).objectModifiers = [...existing, block];
     this.splat.updateGenerator();
   }
 
@@ -197,8 +214,23 @@ export class HoverTint {
     if (!obb) return;
     this.splat.updateWorldMatrix(true, false);
     this._boxInv.copy(obb.getWorldMatrix()).invert();
-    this._m.multiplyMatrices(this._boxInv, this.splat.matrixWorld);
+    if (this.space === "splat") this._m.copy(this._boxInv);
+    else this._m.multiplyMatrices(this._boxInv, this.splat.matrixWorld);
     this.splatToBox.value.copy(this._m);
     this.halfExtents.value.copy(obb.halfExtents);
+    this.lastSplatMatrix.copy(this.splat.matrixWorld);
+  }
+
+  /**
+   * Call once per frame. In "world" mode, refreshes uniforms only if the splat's
+   * world matrix changed since the last refresh. Returns true if it did.
+   */
+  syncSplatTransform(): boolean {
+    if (!this.current || this.space === "splat") return false;
+    this.splat.updateWorldMatrix(true, false);
+    if (this.lastSplatMatrix.equals(this.splat.matrixWorld)) return false;
+    this.refresh();
+    this.splat.updateVersion();
+    return true;
   }
 }
