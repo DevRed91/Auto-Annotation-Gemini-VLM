@@ -140,6 +140,20 @@ p {
     box-shadow: 0 0 10px rgba(0,0,0,0.5);
 }
 
+.annotation-label {
+    position: absolute;
+    top: 0;
+    left: 30px;
+    width: max-content;
+    padding: 4px 8px;
+    border: 1px solid rgba(255,255,255,0.5);
+    border-radius: 4px;
+    background: rgba(0,0,0,0.75);
+    color: white;
+    font: 14px sans-serif;
+    cursor: pointer;
+}
+
 .annotation-card {
     position: absolute;
     top: 30px;
@@ -292,6 +306,11 @@ canvas {
 .toolbar-btn.active {
   background: #76a8ff;
   color: #020617;
+}
+
+.toolbar-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 .annotation-label {
