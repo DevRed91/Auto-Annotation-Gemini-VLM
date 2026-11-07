@@ -106,7 +106,7 @@ export function pickNearestOBB<T extends { obb: OBB }>(
  * tints splats whose center lies inside the hovered OBB. Object modifiers run
  * in splat-local space, so we feed Inverse(boxWorld) * splatWorld.
  *
- * NOTE: this occupies the SplatMesh's single `objectModifier` slot.
+ * Appends to `objectModifiers`, preserving previously installed effects.
  */
 export class HoverTint {
   private splatToBox = dyno.dynoMat4(new THREE.Matrix4());
@@ -154,7 +154,7 @@ export class HoverTint {
         `),
     });
 
-    this.splat.objectModifier = dyno.dynoBlock(
+    const modifier = dyno.dynoBlock(
       { gsplat: dyno.Gsplat },
       { gsplat: dyno.Gsplat },
       ({ gsplat }) => ({
@@ -169,6 +169,7 @@ export class HoverTint {
         }).gsplat,
       }),
     );
+    this.splat.objectModifiers = [...(this.splat.objectModifiers ?? []), modifier];
     this.splat.updateGenerator();
   }
 

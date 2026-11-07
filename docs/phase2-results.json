@@ -1,0 +1,354 @@
+{
+  "environment": {
+    "url": "http://127.0.0.1:5199/phase2.html",
+    "browser": "headless Chromium",
+    "angle": "SwiftShader",
+    "viewport": [
+      640,
+      480
+    ]
+  },
+  "startedAt": "2026-11-07T14:26:43.867Z",
+  "tests": [
+    {
+      "name": "inside/outside and inclusive OBB boundaries return exact ascending IDs",
+      "passed": true
+    },
+    {
+      "name": "margin expands all OBB slabs inclusively",
+      "passed": true
+    },
+    {
+      "name": "opacity threshold is inclusive at the stored (byte-quantised) value",
+      "passed": true,
+      "details": {
+        "stored": 0.5019607843137255,
+        "atBoundary": [
+          0,
+          2,
+          3,
+          6,
+          7
+        ],
+        "justAbove": [
+          0,
+          2,
+          3,
+          7
+        ]
+      }
+    },
+    {
+      "name": "opacity comparison is inclusive for exactly representable values",
+      "passed": true
+    },
+    {
+      "name": "empty meshes and zero-size/planar OBBs are safe",
+      "passed": true
+    },
+    {
+      "name": "invalid callback data is counted and skipped; output is unique and valid",
+      "passed": true
+    },
+    {
+      "name": "invalid OBBs/options/transforms and LOD/paged inputs reject explicitly",
+      "passed": true
+    },
+    {
+      "name": "LOD signals other than enableLod are rejected by lifter and mask (mock)",
+      "passed": true,
+      "details": {
+        "rejected": [
+          "packedSplats.lodSplats",
+          "extSplats.lodSplats",
+          "packedSplats.lod",
+          "extSplats.lod"
+        ]
+      }
+    },
+    {
+      "name": "real Apartment-lod.rad is rejected by lifter and mask manager",
+      "passed": true,
+      "details": {
+        "numSplats": 0,
+        "enableLod": null,
+        "paged": false,
+        "packedLodSplats": true,
+        "extLodSplats": false,
+        "packedLodFlag": null
+      }
+    },
+    {
+      "name": "shader reference changed-pixel count",
+      "passed": true,
+      "details": {
+        "maskVsBaseline": 6052
+      }
+    },
+    {
+      "name": "shader mask equals the equivalent inclusive OBB debug region",
+      "passed": true
+    },
+    {
+      "name": "negative control with shifted IDs produces a different image",
+      "passed": true
+    },
+    {
+      "name": "clear and empty replacement restore the exact pixel baseline",
+      "passed": true
+    },
+    {
+      "name": "mask IDs validate/deduplicate and only changed bytes trigger updates",
+      "passed": true
+    },
+    {
+      "name": "HoverTint appends and composes after existing modifiers",
+      "passed": true
+    },
+    {
+      "name": "splat->OBB mapping is correct for distinct splat and OBB poses (with negative controls)",
+      "passed": true,
+      "details": {
+        "expected": [
+          0,
+          3,
+          5,
+          6,
+          7
+        ],
+        "slack": 0.27034817369442554,
+        "wrong": {
+          "S*inv(O) (swapped order)": [
+            0,
+            5,
+            7
+          ],
+          "inv(O) only (ignores splat transform)": [
+            0,
+            1,
+            2,
+            3,
+            5,
+            6,
+            7
+          ],
+          "S only (ignores OBB transform)": [
+            0,
+            5,
+            6,
+            7
+          ],
+          "inv(S)*O (reversed direction)": [
+            0,
+            1,
+            2,
+            4,
+            5,
+            6,
+            9
+          ]
+        }
+      }
+    },
+    {
+      "name": "post-selection transforms preserve membership and move the highlight",
+      "passed": true
+    },
+    {
+      "name": "disposal removes only its modifier, restores pixels, and is idempotent",
+      "passed": true
+    },
+    {
+      "name": "zero-splat mask creation, invalid replacement and disposal are safe",
+      "passed": true
+    },
+    {
+      "name": "mask texture layout is correct across 4096-wide row boundaries",
+      "passed": true,
+      "details": [
+        {
+          "count": 4096,
+          "rows": 1,
+          "markers": [
+            0,
+            4094,
+            4095
+          ]
+        },
+        {
+          "count": 4097,
+          "rows": 2,
+          "markers": [
+            4095,
+            4096
+          ]
+        },
+        {
+          "count": 8192,
+          "rows": 2,
+          "markers": [
+            4095,
+            4096,
+            8190,
+            8191
+          ]
+        },
+        {
+          "count": 8193,
+          "rows": 3,
+          "markers": [
+            8191,
+            8192
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Apartment.sog non-LOD scan and mask/render performance",
+      "passed": true
+    }
+  ],
+  "performance": {
+    "asset": "Apartment.sog",
+    "initializedSplats": 699086,
+    "lod": false,
+    "liftTotalMs": 58.19999999925494,
+    "scan": {
+      "numSplats": 699086,
+      "scanned": 699086,
+      "candidates": 699086,
+      "accepted": 644105,
+      "opacityRejected": 54981,
+      "invalid": 0,
+      "duplicateIndices": 0,
+      "scanDurationMs": 43.69999999925494
+    },
+    "mask": {
+      "changed": true,
+      "validIds": 644105,
+      "duplicateIds": 0,
+      "invalidIds": 0,
+      "changedBytes": 644105,
+      "rewriteMs": 38.099999997764826,
+      "submissionMs": 0
+    },
+    "firstRenderSubmitMs": 0.20000000298023224,
+    "firstRenderCompletedMs": 0.20000000298023224,
+    "firstRenderChangedPixels": 0,
+    "firstVisibleRenderIndex": 2,
+    "firstVisibleRenderSubmitMs": 0.09999999776482582,
+    "firstVisibleRenderCompletedMs": 0.09999999776482582,
+    "firstVisibleRenderChangedPixels": 307200,
+    "note": "submissionMs is needsUpdate/updateVersion CPU work; completed timings include gl.finish(); visible means pixels differ from baseline"
+  },
+  "shaderErrors": [],
+  "finalGlError": 0,
+  "consoleMessages": [
+    {
+      "type": "debug",
+      "text": "[vite] connecting..."
+    },
+    {
+      "type": "debug",
+      "text": "[vite] connected."
+    },
+    {
+      "type": "info",
+      "text": "[Phase2 PASS] inside/outside and inclusive OBB boundaries return exact ascending IDs"
+    },
+    {
+      "type": "info",
+      "text": "[Phase2 PASS] margin expands all OBB slabs inclusively"
+    },
+    {
+      "type": "info",
+      "text": "[Phase2 PASS] opacity threshold is inclusive at the stored (byte-quantised) value"
+    },
+    {
+      "type": "info",
+      "text": "[Phase2 PASS] opacity comparison is inclusive for exactly representable values"
+    },
+    {
+      "type": "info",
+      "text": "[Phase2 PASS] empty meshes and zero-size/planar OBBs are safe"
+    },
+    {
+      "type": "info",
+      "text": "[Phase2 PASS] invalid callback data is counted and skipped; output is unique and valid"
+    },
+    {
+      "type": "info",
+      "text": "[Phase2 PASS] invalid OBBs/options/transforms and LOD/paged inputs reject explicitly"
+    },
+    {
+      "type": "info",
+      "text": "[Phase2 PASS] LOD signals other than enableLod are rejected by lifter and mask (mock)"
+    },
+    {
+      "type": "warning",
+      "text": "[.WebGL-0x124004d6000]GL Driver Message (OpenGL, Performance, GL_CLOSE_PATH_NV, High): GPU stall due to ReadPixels"
+    },
+    {
+      "type": "warning",
+      "text": "[.WebGL-0x124004d6000]GL Driver Message (OpenGL, Performance, GL_CLOSE_PATH_NV, High): GPU stall due to ReadPixels"
+    },
+    {
+      "type": "warning",
+      "text": "[.WebGL-0x124004d6000]GL Driver Message (OpenGL, Performance, GL_CLOSE_PATH_NV, High): GPU stall due to ReadPixels"
+    },
+    {
+      "type": "warning",
+      "text": "[.WebGL-0x124004d6000]GL Driver Message (OpenGL, Performance, GL_CLOSE_PATH_NV, High): GPU stall due to ReadPixels (this message will no longer repeat)"
+    },
+    {
+      "type": "info",
+      "text": "[Phase2 PASS] real Apartment-lod.rad is rejected by lifter and mask manager"
+    },
+    {
+      "type": "info",
+      "text": "[Phase2 PASS] shader mask equals the equivalent inclusive OBB debug region"
+    },
+    {
+      "type": "info",
+      "text": "[Phase2 PASS] negative control with shifted IDs produces a different image"
+    },
+    {
+      "type": "info",
+      "text": "[Phase2 PASS] clear and empty replacement restore the exact pixel baseline"
+    },
+    {
+      "type": "info",
+      "text": "[Phase2 PASS] mask IDs validate/deduplicate and only changed bytes trigger updates"
+    },
+    {
+      "type": "info",
+      "text": "[Phase2 PASS] HoverTint appends and composes after existing modifiers"
+    },
+    {
+      "type": "info",
+      "text": "[Phase2 PASS] splat->OBB mapping is correct for distinct splat and OBB poses (with negative controls)"
+    },
+    {
+      "type": "info",
+      "text": "[Phase2 PASS] post-selection transforms preserve membership and move the highlight"
+    },
+    {
+      "type": "info",
+      "text": "[Phase2 PASS] disposal removes only its modifier, restores pixels, and is idempotent"
+    },
+    {
+      "type": "info",
+      "text": "[Phase2 PASS] zero-splat mask creation, invalid replacement and disposal are safe"
+    },
+    {
+      "type": "info",
+      "text": "[Phase2 PASS] mask texture layout is correct across 4096-wide row boundaries"
+    },
+    {
+      "type": "info",
+      "text": "[Phase2 PASS] Apartment.sog non-LOD scan and mask/render performance"
+    }
+  ],
+  "pageErrors": [],
+  "consoleErrors": []
+}
