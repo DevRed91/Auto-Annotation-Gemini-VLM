@@ -1,95 +1,185 @@
-# Semantic Lifting Backend for 3DGS
+# Gaussian Splat Object Selection & Highlighting
 
-This backend service acts as the vision-intelligence engine for a Gaussian Splatting viewer. It processes 2D snapshots of a 3D scene and utilizes Google Gemini to perform semantic object detection (identifying chairs and photo frames).
+A research and engineering project exploring object-level selection, Gaussian index lifting and GPU-based highlighting in 3D Gaussian Splatting scenes using **SparkJS, Three.js and WebGL shaders**.
 
-## Overview
-This service provides an API endpoint that:
-1. Receives a Base64 image snapshot from the frontend.
-2. Applies spatial context (bounding boxes/click coordinates).
-3. Queries Gemini (Vision) to segment/identify objects.
-4. Returns structured JSON to the frontend for 3D "Lifting" (mapping 2D boxes to 3D world space).
+The objective is to develop a reliable foundation for selecting, associating and visualising individual objects within Gaussian Splat scenes, eventually enabling AI-driven spatial search and scene understanding.
 
-## Tech Stack
-*   **Runtime:** Node.js
-*   **Framework:** Express.js
-*   **AI SDK:** `@google/generative-ai`
-*   **Language:** TypeScript/JavaScript
+## Project Overview
 
-## Prerequisites
-*   Node.js (v18+)
-*   An API Key from [Google AI Studio](https://aistudio.google.com/)
+Traditional 3D object selection operates on explicit geometry such as meshes, vertices and bounding volumes. Gaussian Splatting represents scenes differently: objects and environments are reconstructed using collections of anisotropic 3D Gaussians.
 
-## Installation
+This creates a different selection problem:
 
-1. Clone the repository and install dependencies:
-   ```bash
-   npm install
-   ```
+**Given a spatial region representing an object, how can we identify the Gaussian primitives associated with that region and highlight them efficiently without modifying the underlying scene representation?**
 
-2. Create a `.env` file in the root directory:
-   ```text
-   GEMINI_API_KEY=your_actual_api_key_here
-   ```
+This project investigates that problem through a phased implementation:
 
-3. Start the development server:
-   ```bash
-   npm run dev
-   # OR
-   npx ts-node server.ts
-   ```
+1. Validate Gaussian identity and GPU mask rendering.
+2. Establish a geometric selection baseline using oriented bounding boxes.
+3. Convert geometric selections into Gaussian storage indices.
+4. Render selections using GPU-based masks.
+5. Extend the architecture to support multiple independently selected objects.
 
-## Frontend API Configuration
+The longer-term direction is to connect Gaussian-level selection with semantic object understanding and spatial intelligence.
 
-Create a `.env` file in the frontend project root:
+## Technology Stack
+
+| Technology | Purpose |
+|---|---|
+| TypeScript | Core application and spatial processing |
+| Three.js | 3D scene and rendering infrastructure |
+| SparkJS 2.0.0 | Gaussian Splat loading and rendering |
+| WebGL / GLSL | GPU-based Gaussian highlighting |
+| R8UI textures | Integer-based Gaussian selection masks |
+| Vite | Development server and build tooling |
+| Playwright | Browser-based validation |
+| Node.js | Development and validation scripts |
+
+## Architecture
+
+The current experimental selection pipeline is:
 
 ```text
-VITE_API_BASE_URL=/api
-VITE_BYPASS_TUNNEL_REMINDER=false
+3D Scene / Gaussian Splat
+          |
+          v
+ Object Detection / Annotation
+          |
+          v
+   3D Object Region
+          |
+          v
+   OBB Representation
+          |
+          v
+   Gaussian Index Lifting
+          |
+          v
+   Gaussian Storage Indices
+          |
+          v
+   GPU Selection Mask
+          |
+          v
+   GLSL Shader Modifier
+          |
+          v
+  Gaussian Highlighting
 ```
 
-Notes:
-- For local development with Vite proxy, keep `VITE_API_BASE_URL=/api`.
-- For deployed frontend + local backend tunnel, set `VITE_API_BASE_URL` to your public tunnel URL (for example `https://example.loca.lt`).
-- Set `VITE_BYPASS_TUNNEL_REMINDER=true` only if your tunnel provider requires that custom header.
+The selection and rendering responsibilities are deliberately separated.
 
-## API Documentation
+- Geometric processing determines which Gaussian indices satisfy a selection region.
+- The mask manager maintains the GPU representation of selected indices.
+- The shader modifier uses the mask to visualise selected Gaussians.
 
-### `POST /api/annotate`
+The current implementation uses Gaussian centres and source opacity for geometric membership. It does not establish semantic ownership of individual Gaussians.
 
-Analyzes an image snapshot to detect chairs and photo frames within a specific region.
+## Implementation Progress
 
-**Request Body:**
-```json
-{
-  "image": "data:image/jpeg;base64,...",
-  "userBox": [ymin, xmin, ymax, xmax] 
-}
-```
+### Phase 0 — Gaussian Identity and GPU Mask Probe
 
-**Response:**
-```json
-{
-  "chairs": [{"box": [0.2, 0.3, 0.5, 0.4]}],
-  "frames": [{"box": [0.1, 0.8, 0.2, 0.9]}]
-}
-```
+**Status: Implemented and validated for the tested non-LOD configuration.**
 
-## Troubleshooting & FAQ
+Objective: Investigate whether Gaussian storage indices can be used to identify and selectively highlight individual Gaussian primitives through a GPU mask.
 
-### 1. "404 Not Found" Errors
-If you see a 404 in the terminal, it usually means your API Key does not have access to the model string provided in the code.
-*   **Solution:** Run a model discovery script to see your authorized models. Use the exact model name from your authorized list (e.g., `models/gemini-3.5-flash`).
+Implemented:
 
-### 2. "No JSON found" Errors
-This happens when Gemini returns empty results or chatty text.
-*   **Solution:** Check your `server.ts` regex logic. Ensure the prompt explicitly tells the model: *"No markdown, no backticks, return ONLY raw JSON."*
+- Gaussian identity investigation using SparkJS.
+- R8UI mask texture.
+- Gaussian index-to-texture coordinate mapping.
+- Shader-based selection highlighting.
+- Integration with the existing modifier chain.
+- Debug-region selection for comparing CPU Gaussian indices with shader indices.
+- Mask replacement and clearing.
 
-### 3. Image Size Issues
-If images are coming through as "invalid format," ensure your `express.json` limit is set to at least `20mb`. Base64 snapshots are large.
+Validation:
 
-## Current Configuration
-*   **Model:** `models/gemini-3.5-flash`.
-*   **Classes Detected:** Chairs, Frames.
+- Tested with `Apartment.sog`.
+- Approximately 699,086 Gaussian splats.
+- CPU-selected indices and shader debug-region selection produced identical output in the tested comparison.
+- Mask replacement and clearing were validated.
+- Modifier composition with hover highlighting was investigated.
 
-***
+The validation used headless Chromium and software rendering. Hardware GPU, LOD and mobile behaviour were not established.
 
+### Phase 1 — OBB Geometric Selection Baseline
+
+**Status: Implemented and validated as a geometric baseline.**
+
+Objective: Establish a geometric selection mechanism that identifies Gaussian centres within an oriented bounding box fitted around an extracted object.
+
+Implemented:
+
+- PCA-based OBB fitting.
+- 3×3 Jacobi eigensolver.
+- Eigenvalue sorting and orientation correction.
+- Right-handed OBB coordinate frame.
+- AABB fallback for degenerate point distributions.
+- World-space and splat-local coordinate handling.
+- OBB-based Gaussian highlighting.
+- Persistent cluster highlighting alongside transient hover highlighting.
+- Development-only detection injection for deterministic testing.
+
+Validation included:
+
+- Basic OBB selection.
+- Translation and rotation checks.
+- World-to-local coordinate consistency.
+- Highlight and wireframe alignment checks.
+- Multiple detection replacement behaviour.
+
+Limitations:
+
+- OBB membership is not semantic segmentation.
+- Background Gaussians can be included within the bounding volume.
+- Uniform scale is assumed by the coordinate conversion implementation.
+- LOD and broad hardware GPU validation were not established.
+
+### Phase 2 — Gaussian Index Lifting
+
+**Status: Implemented and browser-validated.**
+
+Objective: Convert an existing world-space OBB into a deterministic collection of Gaussian storage indices and render those indices using an independent GPU mask manager.
+
+Implemented components:
+
+**`clusterLifter.ts`**
+
+- Converts a world-space OBB into Gaussian storage indices.
+- Supports configurable geometric margin and minimum opacity.
+- Uses Gaussian centres for membership testing.
+- Returns sorted, deduplicated indices.
+- Reports diagnostics including scanned, candidate, accepted, rejected and invalid counts.
+- Validates input geometry and transformations.
+- Explicitly rejects unsupported LOD and paged sources.
+
+**`gaussianMaskManager.ts`**
+
+- Owns an R8UI selection texture.
+- Maps Gaussian storage indices to texture coordinates.
+- Applies highlighting through a shader modifier.
+- Supports mask replacement and clearing.
+- Tracks changed bytes and avoids unnecessary updates.
+- Handles invalid and duplicate indices.
+- Supports idempotent disposal.
+
+**Validation results**
+
+The final recorded Phase 2 validation reported:
+
+- 17 assertion-bearing checks passed.
+- Zero failed checks.
+- CPU and shader selection agreement.
+- Correct mask replacement and clearing.
+- Transform invariance checks.
+- Modifier composition checks.
+- Resource disposal checks.
+- Explicit LOD and paged-source rejection.
+
+A reference performance run on `Apartment.sog` with 699,086 splats reported:
+
+| Operation | Recorded time |
+|---|---:|
+| Full Gaussian lifting | 63.4 ms |
+| Gaussian source scan | 47.
