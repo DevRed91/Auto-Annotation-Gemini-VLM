@@ -1,8 +1,8 @@
 # Gaussian Cluster Highlighting — Investigation & Implementation Plan
 
-Status: **investigation only — no implementation started, awaiting approval.**
+Status: **investigation; Phase 0 spike run and passed (§8.1). Implementation not started, awaiting approval.**
 Scope: how to highlight the Gaussians (splats) that belong to an extracted object in the Spark.js viewer.
-Method: static reading of repository source (branch `experiment/hover-tint`, and `main` via `git show main:<path>`) and the installed Spark package. **Nothing was executed in a browser.** Runtime behaviour is labelled as an assumption unless stated.
+Method: static reading of repository source (branch `experiment/hover-tint`, and `main` via `git show main:<path>`) and the installed Spark package. Sections 1–7 are from static reading only. The Phase 0 spike was later run in headless Chrome (§8.1), and that is the only runtime evidence. Other runtime behaviour is labelled as an assumption unless stated.
 
 Legend: **[V]** verified from source · **[A]** assumption · **[Q]** unresolved question · **[R]** recommendation.
 
@@ -70,7 +70,7 @@ Package: `@sparkjsdev/spark` **2.0.0** (`node_modules/@sparkjsdev/spark/package.
 | F10 | Raycast returns distance/point/object only, with no splat index. `SplatMesh.raycastIndices` is an input to raycast, not an output. | `spark.module.js:12731-12732` |
 | F11 | `SplatMesh` exposes `splatRgba`, `rgbaDisplaceEdits`, `edits`, `editable`, `raycastable`, `minRaycastOpacity`, `recolor`, `opacity`, `enableLod`, `paged`. | `dist/types/SplatMesh.d.ts` |
 
-**Not verified from source** (to settle in Phase 0): the public way to declare a custom data-texture uniform on a user `dyno.Dyno` and sample it with `texelFetch`. Spark itself uses an internal `splatTexCoord(index)` helper at `spark.module.js:12915`, and it is unknown whether that helper is visible to user modifier GLSL. [Q]
+**Not verified from source** (settled at runtime — see §8.1: works): the public way to declare a custom data-texture uniform on a user `dyno.Dyno` and sample it with `texelFetch`. Spark itself uses an internal `splatTexCoord(index)` helper at `spark.module.js:12915`, and it is unknown whether that helper is visible to user modifier GLSL. [Q]
 
 ---
 
@@ -90,9 +90,9 @@ Package: `@sparkjsdev/spark` **2.0.0** (`node_modules/@sparkjsdev/spark/package.
 4. DBSCAN `eps=0.3` is in world units and the scene is roughly metre-scale.
 
 ### Unresolved questions [Q]
-1. Which asset is the real target (`City_Block.ply` is missing)?
-2. Is LOD or paging required for the target? This changes index semantics and `splatRgba` availability.
-3. Can a user dyno bind a custom data texture?
+1. Which asset is the real target? (The initial load now points at `Apartment-lod.rad` per `e281c2b`; earlier it was `Apartment.sog`; `City_Block.ply` is missing.)
+2. Is LOD or paging required for the target? (`Apartment.sog` is non-LOD, `h.lod=false`; `Apartment-lod.rad` untested, and it is now the viewer's default.) This changes index semantics and `splatRgba` availability.
+3. ~~Can a user dyno bind a custom data texture?~~ **Resolved: yes** (Phase 0 run, §8.1). `dyno.dynoUsampler2D` + `usampler2D` input + `texelFetch` compiles and samples correctly.
 4. Should the highlight be the *exact Gaussians in the cluster* or *all Gaussians within the cluster's region*? Sparse surface samples make "exact" fuzzy.
 5. Should highlights persist per object (several at once) in addition to hover?
 6. Should the extraction branch (`main`) and hover branch be merged first?
@@ -195,22 +195,30 @@ No dependency, configuration or standalone shader-file changes are expected. GLS
 
 ## 8. Phased plan & validation criteria
 
-**Phase 0 — Spikes.** *Status: in progress. Probe code is written (branch `experiment/gaussian-id-probe`); nothing has been run yet.*
+**Phase 0 — Spikes.** *Status: done, all steps passed — see §8.1.*
 
 | Item | Status | Notes |
 |---|---|---|
-| Confirm the target asset | Mostly done | `5dd49fd` points the initial load at `Apartment.sog`, which exists in `public/`. This resolves the missing `City_Block.ply` question. |
-| Confirm whether LOD is active | **Open** | `src/experiment/harness.ts` records `h.lod`, but the value has not been read. `public/` also contains `Apartment-lod.rad`, so confirm which file the viewer loads. |
-| Prove a custom mask texture binds and samples in a user dyno via `gsplat.index` | Code written, **not verified** | `src/experiment/gaussianIdProbe.ts` builds an `R8UI` `DataTexture` (4096 wide, id → `(id & 4095, id >> 12)`), binds it with `dyno.dynoUsampler2D`, and samples it with `texelFetch`. It appends to `objectModifiers`, after `HoverTint`. |
-| Validate that a hard-coded mask for splats `0..N` tints exactly those splats | **Open** | `probe.html` and `harness.ts` expose `window.h` (`probe`, `pixels()`, `diff()`). `setDebugRegion` cross-checks CPU indices from `forEachSplat` against the shader's `gsplat.index`. No run results are recorded. |
+| Confirm the target asset | **Changed, needs confirming** | `5dd49fd` pointed the initial load at `Apartment.sog`, but the latest commit `e281c2b` points it at `Apartment-lod.rad`. The viewer's current default is therefore probably the LOD file, while Phase 0 ran on the non-LOD `.sog`. |
+| Confirm whether LOD is active | **Partly done** | `Apartment.sog`: `h.lod=false`. `Apartment-lod.rad` was **not** tested. If the viewer loads the `.rad`, index semantics (F5) and the `splatRgba` limitation (F6) apply, so repeat steps 3–4 on it before Phase 2. |
+| Prove a custom mask texture binds and samples in a user dyno via `gsplat.index` | **Done, passed (non-LOD)** | `src/experiment/gaussianIdProbe.ts` builds an `R8UI` `DataTexture` (4096 wide, id → `(id & 4095, id >> 12)`), binds it with `dyno.dynoUsampler2D`, and samples it with `texelFetch`. It appends to `objectModifiers`, after `HoverTint`. |
+| Validate that a hard-coded mask for splats `0..N` tints exactly those splats | **Done, passed (non-LOD)** | See §8.1. `setDebugRegion` cross-check shows CPU `forEachSplat` indices equal the shader's `gsplat.index`. |
 
-Remaining steps:
-1. Open `probe.html` and confirm there are no shader compile or GL errors. This settles Q3.
-2. Read `h.lod` and `h.numSplats` for the target file.
-3. Run `probe.replace([0..N])`, then compare `pixels()` before and after with `diff()`. *Validate:* only those splats change.
-4. Use `setDebugRegion` to confirm the CPU `forEachSplat` indices match the shader's `gsplat.index`.
-5. Confirm the probe composes with `HoverTint` in the `objectModifiers` array.
-6. Record results here. Update §3 (Q3) and §4. If step 1 or 3 fails, fall back to Approach B.
+Steps 1–6 of the original checklist are complete and recorded in §8.1. **Next spike:** repeat steps 2–4 with `?url=http://localhost:<port>/Apartment-lod.rad`.
+
+### 8.1 Phase 0 results (run 2026-11-07)
+
+Environment: headless Chrome via Playwright, SwiftShader (software GL), vite dev server, `probe.html?url=http://localhost:5199/Apartment.sog` (absolute URL needed; a relative one fails inside Spark's blob worker). Camera at world (0, 0.4, 0) looking -z, 640x480.
+
+| Step | Result |
+|---|---|
+| 1. Shader/GL errors | **Pass.** No shader compile errors, `gl.getError()` empty after all runs. Only console error was one unrelated 404 (cause not identified). |
+| 2. `h.lod`, `h.numSplats` | `lod=false`, `numSplats=699086`, `objectModifiers.length=2`. Splat-local center bounds x[-4.55,5.05] y[-5.04,1.15] z[-7.52,7.30]. |
+| 3. `replace(ids)` then `diff()` | **Pass.** Control (two baseline renders) diff = 0. ids `0..19999` changed 0 px (off-screen from this camera; inconclusive on its own). 5078 splats from a visible region changed 26079 px, 0 of them outside the projected bbox of those splats (+40 px). `clear()` and `replace([])` return exactly to baseline (diff 0). |
+| 4. `setDebugRegion` vs mask | **Pass.** 35503 CPU ids from `forEachSplat` in a local box: mask image vs shader-region image diff = **0** px (71283 px differ from baseline). Negative control (ids shifted by 1) differs by 15633 px. So CPU `forEachSplat` index == shader `gsplat.index` (non-LOD). |
+| 5. Composes with `HoverTint` | **Pass.** Hover only 9239 px, probe only 26079 px, both 28603 px; both-vs-hover 26632, both-vs-probe 7807. Both effects visible together with 2 modifiers in the array. |
+
+Caveats: "only those splats change" is bounded by projected-bbox and region-equality evidence, not a per-splat proof. Software GL, one camera pose. Non-LOD `.sog` only; LOD/`.rad` index semantics (F5) still untested. The Q3 outcome means Approach A is **not** blocked; no fallback to B needed.
 
 **Phase 1 — Coordinates and OBB baseline.**
 - Merge extraction and hover-tint work. Fit an OBB to the cluster and feed it to `HoverTint`.
@@ -250,7 +258,7 @@ Remaining steps:
 | Cluster is sparse surface samples | Misses interior or back splats | Inflate margin; OBB region; grow by splat scale |
 | Gemini box wrong / DBSCAN picks wrong cluster | Wrong object highlighted | Out of scope; surface the box for debugging |
 | Depth readback not functional | Fewer, poorer points | Rely on raycast; verify in Phase 0 |
-| Custom texture uniform unsupported in user dynos | Plan A blocked | Fall back to Approach B (or D if non-LOD) |
+| ~~Custom texture uniform unsupported in user dynos~~ | Retired: Phase 0 showed it works (§8.1) | None needed |
 | Branch divergence (`main` vs `experiment/hover-tint`) | Merge conflicts | Decide branch strategy first (Q6) |
 | Hover tint unverified in browser | Unknown baseline bugs | Phase 1 smoke test before building on it |
 
