@@ -195,10 +195,22 @@ No dependency, configuration or standalone shader-file changes are expected. GLS
 
 ## 8. Phased plan & validation criteria
 
-**Phase 0 — Spikes.**
-- Confirm the target asset and whether LOD is active.
-- Prove a custom mask texture can be bound and sampled in a user dyno via `gsplat.index`.
-- *Validate:* a hard-coded mask for splats `0..N` visibly tints exactly those splats.
+**Phase 0 — Spikes.** *Status: in progress. Probe code is written (branch `experiment/gaussian-id-probe`); nothing has been run yet.*
+
+| Item | Status | Notes |
+|---|---|---|
+| Confirm the target asset | Mostly done | `5dd49fd` points the initial load at `Apartment.sog`, which exists in `public/`. This resolves the missing `City_Block.ply` question. |
+| Confirm whether LOD is active | **Open** | `src/experiment/harness.ts` records `h.lod`, but the value has not been read. `public/` also contains `Apartment-lod.rad`, so confirm which file the viewer loads. |
+| Prove a custom mask texture binds and samples in a user dyno via `gsplat.index` | Code written, **not verified** | `src/experiment/gaussianIdProbe.ts` builds an `R8UI` `DataTexture` (4096 wide, id → `(id & 4095, id >> 12)`), binds it with `dyno.dynoUsampler2D`, and samples it with `texelFetch`. It appends to `objectModifiers`, after `HoverTint`. |
+| Validate that a hard-coded mask for splats `0..N` tints exactly those splats | **Open** | `probe.html` and `harness.ts` expose `window.h` (`probe`, `pixels()`, `diff()`). `setDebugRegion` cross-checks CPU indices from `forEachSplat` against the shader's `gsplat.index`. No run results are recorded. |
+
+Remaining steps:
+1. Open `probe.html` and confirm there are no shader compile or GL errors. This settles Q3.
+2. Read `h.lod` and `h.numSplats` for the target file.
+3. Run `probe.replace([0..N])`, then compare `pixels()` before and after with `diff()`. *Validate:* only those splats change.
+4. Use `setDebugRegion` to confirm the CPU `forEachSplat` indices match the shader's `gsplat.index`.
+5. Confirm the probe composes with `HoverTint` in the `objectModifiers` array.
+6. Record results here. Update §3 (Q3) and §4. If step 1 or 3 fails, fall back to Approach B.
 
 **Phase 1 — Coordinates and OBB baseline.**
 - Merge extraction and hover-tint work. Fit an OBB to the cluster and feed it to `HoverTint`.
